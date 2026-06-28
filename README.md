@@ -2,6 +2,10 @@
 
 React + Vite frontend with a FastAPI + MySQL backend for the 2026 supply-chain ledger.
 
+## Documentation
+
+- [Local deployment guide](docs/LOCAL_DEPLOYMENT.md)
+
 ## Local Runtime
 
 Prerequisites:
