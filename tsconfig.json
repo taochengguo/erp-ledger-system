@@ -17,5 +17,11 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src/main.tsx", "src/App.tsx", "src/api.ts", "src/types.ts"]
+  "include": [
+    "src/main.tsx",
+    "src/App.tsx",
+    "src/types.ts",
+    "src/data.ts",
+    "src/components/**/*.tsx"
+  ]
 }
