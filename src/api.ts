@@ -36,16 +36,42 @@ export interface BackendProjectLedger {
 }
 
 export interface BackendOrderRecord {
+  amount_type?: string | null;
   project_code: string;
+  project_name?: string | null;
+  department?: string | null;
+  branch_company?: string | null;
+  account_manager?: string | null;
   order_no: string;
   order_date: string | null;
+  statistical_category?: string | null;
+  team_name?: string | null;
   goods_name: string | null;
+  spec_model?: string | null;
   unit_name: string | null;
   quantity: number | null;
+  net_unit_price?: number | null;
+  unit_price?: number | null;
+  net_revenue?: number | null;
   order_value: number | null;
   delivery_quantity: number | null;
   business_type: string | null;
   customer_unit_name: string | null;
+  user_name?: string | null;
+  regional_platform?: string | null;
+  supplier_name?: string | null;
+  purchase_unit_price_no_tax?: number | null;
+  purchase_unit_price?: number | null;
+  cost_no_tax?: number | null;
+  purchase_amount?: number | null;
+  delivery_date?: string | null;
+  delivery_revenue_no_tax?: number | null;
+  delivery_value?: number | null;
+  delivery_cost_no_tax?: number | null;
+  delivery_cost?: number | null;
+  pending_delivery_quantity?: number | null;
+  pending_delivery_amount_no_tax?: number | null;
+  pending_delivery_amount?: number | null;
 }
 
 export interface BackendPurchaseRecord {

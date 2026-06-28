@@ -5,14 +5,34 @@ import {
   RotateCcw, 
   ChevronLeft, 
   ChevronRight, 
-  Trash2, 
-  Info,
-  Layers,
-  Sparkles,
   ShoppingBag,
-  MoreVertical
+  Upload,
+  Eye,
+  X
 } from 'lucide-react';
 import { OrderRecord } from '../types';
+
+interface OrderPurchaseEntry {
+  id: string;
+  supplier: string;
+  netPurchaseUnitPrice?: number;
+  purchaseUnitPrice?: number;
+  netCost?: number;
+  purchaseAmount?: number;
+}
+
+interface OrderDeliveryEntry {
+  id: string;
+  deliveryDate: string;
+  deliveredQty?: number;
+  deliveredNetRevenue?: number;
+  deliveryValue?: number;
+  deliveredNetCost?: number;
+  deliveryCost?: number;
+  pendingQty?: number;
+  pendingNetAmount?: number;
+  pendingAmount?: number;
+}
 
 interface OrdersScreenProps {
   orders: OrderRecord[];
@@ -35,6 +55,10 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
   const [clientUnit, setClientUnit] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  const [activeEntryModal, setActiveEntryModal] = useState<'purchase' | 'delivery' | null>(null);
+  const [orderPurchases, setOrderPurchases] = useState<Record<string, OrderPurchaseEntry[]>>({});
+  const [orderDeliveries, setOrderDeliveries] = useState<Record<string, OrderDeliveryEntry[]>>({});
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -43,16 +67,47 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
   // New Order Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [newOrder, setNewOrder] = useState({
+    amountType: '全额',
     projectId: '',
+    department: '',
+    branchCompany: '',
+    manager: '',
     orderId: '',
     orderDate: new Date().toISOString().split('T')[0],
+    statisticalCategory: '',
+    teamName: '',
+    projectName: '',
+    userName: '',
+    regionalPlatform: '',
     goodsName: '',
+    specModel: '',
     quantityVal: '',
     quantityUnit: '套',
+    netUnitPrice: '',
+    unitPrice: '',
+    netRevenue: '',
     orderValue: '',
     deliveredQty: '0',
     businessType: '咨询服务',
     clientUnit: ''
+  });
+  const [newPurchase, setNewPurchase] = useState({
+    supplier: '',
+    netPurchaseUnitPrice: '',
+    purchaseUnitPrice: '',
+    netCost: '',
+    purchaseAmount: '',
+  });
+  const [newDelivery, setNewDelivery] = useState({
+    deliveryDate: new Date().toISOString().split('T')[0],
+    deliveredQty: '',
+    deliveredNetRevenue: '',
+    deliveryValue: '',
+    deliveredNetCost: '',
+    deliveryCost: '',
+    pendingQty: '',
+    pendingNetAmount: '',
+    pendingAmount: '',
   });
 
   // Reset Filters
@@ -89,6 +144,83 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / itemsPerPage));
   const paginationItems = getPaginationItems(totalPages);
+  const selectedOrderKey = selectedOrder ? `${selectedOrder.projectId}-${selectedOrder.orderId}` : '';
+  const backendPurchase = selectedOrder && (
+    selectedOrder.supplierName ||
+    selectedOrder.purchaseUnitPriceNoTax ||
+    selectedOrder.purchaseUnitPrice ||
+    selectedOrder.costNoTax ||
+    selectedOrder.purchaseAmount
+  )
+    ? [{
+        id: 'backend-purchase',
+        supplier: selectedOrder.supplierName || '',
+        netPurchaseUnitPrice: selectedOrder.purchaseUnitPriceNoTax,
+        purchaseUnitPrice: selectedOrder.purchaseUnitPrice,
+        netCost: selectedOrder.costNoTax,
+        purchaseAmount: selectedOrder.purchaseAmount,
+      }]
+    : [];
+  const backendDelivery = selectedOrder && (
+    selectedOrder.deliveryDate ||
+    selectedOrder.deliveredQty ||
+    selectedOrder.deliveryRevenueNoTax ||
+    selectedOrder.deliveryValue ||
+    selectedOrder.deliveryCostNoTax ||
+    selectedOrder.deliveryCost ||
+    selectedOrder.pendingDeliveryQuantity ||
+    selectedOrder.pendingDeliveryAmountNoTax ||
+    selectedOrder.pendingDeliveryAmount
+  )
+    ? [{
+        id: 'backend-delivery',
+        deliveryDate: selectedOrder.deliveryDate || '',
+        deliveredQty: selectedOrder.deliveredQty,
+        deliveredNetRevenue: selectedOrder.deliveryRevenueNoTax,
+        deliveryValue: selectedOrder.deliveryValue,
+        deliveredNetCost: selectedOrder.deliveryCostNoTax,
+        deliveryCost: selectedOrder.deliveryCost,
+        pendingQty: selectedOrder.pendingDeliveryQuantity,
+        pendingNetAmount: selectedOrder.pendingDeliveryAmountNoTax,
+        pendingAmount: selectedOrder.pendingDeliveryAmount,
+      }]
+    : [];
+  const selectedPurchases = selectedOrderKey ? [...backendPurchase, ...(orderPurchases[selectedOrderKey] || [])] : [];
+  const selectedDeliveries = selectedOrderKey ? [...backendDelivery, ...(orderDeliveries[selectedOrderKey] || [])] : [];
+
+  const formatMoney = (value: number) =>
+    new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  const formatOptionalMoney = (value: number | undefined) =>
+    value === undefined ? '' : `¥${formatMoney(value)}`;
+  const blank = (value: string | number | undefined | null) => value === undefined || value === null ? '' : String(value);
+
+  const resetNewOrder = () => {
+    setNewOrder({
+      amountType: '全额',
+      projectId: '',
+      department: '',
+      branchCompany: '',
+      manager: '',
+      orderId: '',
+      orderDate: new Date().toISOString().split('T')[0],
+      statisticalCategory: '',
+      teamName: '',
+      projectName: '',
+      userName: '',
+      regionalPlatform: '',
+      goodsName: '',
+      specModel: '',
+      quantityVal: '',
+      quantityUnit: '套',
+      netUnitPrice: '',
+      unitPrice: '',
+      netRevenue: '',
+      orderValue: '',
+      deliveredQty: '0',
+      businessType: '咨询服务',
+      clientUnit: '',
+    });
+  };
 
   // Form submit handler
   const handleSubmit = (e: React.FormEvent) => {
@@ -99,33 +231,144 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
     }
 
     onAddOrder({
+      amountType: newOrder.amountType,
       projectId: newOrder.projectId,
+      department: newOrder.department,
+      branchCompany: newOrder.branchCompany,
+      manager: newOrder.manager,
       orderId: newOrder.orderId,
       orderDate: newOrder.orderDate,
+      statisticalCategory: newOrder.statisticalCategory,
+      teamName: newOrder.teamName,
+      projectName: newOrder.projectName,
+      userName: newOrder.userName,
+      regionalPlatform: newOrder.regionalPlatform,
       goodsName: newOrder.goodsName,
+      specModel: newOrder.specModel,
+      unitName: newOrder.quantityUnit,
       quantity: `${newOrder.quantityVal} ${newOrder.quantityUnit}`,
+      netUnitPrice: parseFloat(newOrder.netUnitPrice) || 0,
+      unitPrice: parseFloat(newOrder.unitPrice) || 0,
+      netRevenue: parseFloat(newOrder.netRevenue) || 0,
       orderValue: parseFloat(newOrder.orderValue) || 0,
       deliveredQty: parseInt(newOrder.deliveredQty) || 0,
       businessType: newOrder.businessType,
       clientUnit: newOrder.clientUnit
     });
 
-    // Reset Form Data
-    setNewOrder({
-      projectId: '',
-      orderId: '',
-      orderDate: new Date().toISOString().split('T')[0],
-      goodsName: '',
-      quantityVal: '',
-      quantityUnit: '套',
-      orderValue: '',
-      deliveredQty: '0',
-      businessType: '咨询服务',
-      clientUnit: ''
-    });
-
+    resetNewOrder();
     setShowAddModal(false);
     setCurrentPage(1);
+  };
+
+  const parseCsvLine = (line: string) => line.split(',').map((value) => value.trim().replace(/^"|"$/g, ''));
+
+  const handleBatchImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const content = await file.text();
+    const [headerLine, ...rows] = content.split(/\r?\n/).filter(Boolean);
+    const headers = parseCsvLine(headerLine);
+    let imported = 0;
+
+    rows.forEach((row) => {
+      const values = parseCsvLine(row);
+      const data = headers.reduce<Record<string, string>>((acc, header, index) => {
+        acc[header] = values[index] || '';
+        return acc;
+      }, {});
+      const project = data['项目编号'] || data.projectId;
+      const order = data['订单号'] || data.orderId;
+      const goods = data['货物名称'] || data['货物/服务名称'] || data.goodsName;
+      const client = data['客户单位名称'] || data['客户单位'] || data.clientUnit;
+      if (!project || !order || !goods || !client) return;
+
+      onAddOrder({
+        amountType: data['全额/净额'] || data.amountType || '全额',
+        projectId: project,
+        department: data['部门'] || '',
+        branchCompany: data['分公司'] || '',
+        manager: data['客户经理'] || '',
+        orderId: order,
+        orderDate: data['订单日期'] || new Date().toISOString().split('T')[0],
+        businessType: data['业务类型'] || '',
+        statisticalCategory: data['统计类别'] || '',
+        teamName: data['三级团队名称'] || '',
+        clientUnit: client,
+        userName: data['用户'] || '',
+        regionalPlatform: data['区域平台'] || '',
+        projectName: data['项目名称'] || '',
+        goodsName: goods,
+        specModel: data['规格型号'] || '',
+        unitName: data['单位'] || '',
+        quantity: `${data['数量'] || '0'} ${data['单位'] || ''}`.trim(),
+        netUnitPrice: parseFloat(data['不含税单价']) || 0,
+        unitPrice: parseFloat(data['单价']) || 0,
+        netRevenue: parseFloat(data['不含税收入']) || 0,
+        orderValue: parseFloat(data['订单价值']) || 0,
+        deliveredQty: 0,
+      });
+      imported++;
+    });
+
+    event.target.value = '';
+    setCurrentPage(1);
+    alert(`批量导入完成：成功导入 ${imported} 条客户订单。`);
+  };
+
+  const handlePurchaseSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedOrder || !newPurchase.supplier) {
+      alert('请填写采购厂商。');
+      return;
+    }
+    const entry: OrderPurchaseEntry = {
+      id: `purchase-${Date.now()}`,
+      supplier: newPurchase.supplier,
+      netPurchaseUnitPrice: parseFloat(newPurchase.netPurchaseUnitPrice) || 0,
+      purchaseUnitPrice: parseFloat(newPurchase.purchaseUnitPrice) || 0,
+      netCost: parseFloat(newPurchase.netCost) || 0,
+      purchaseAmount: parseFloat(newPurchase.purchaseAmount) || 0,
+    };
+    setOrderPurchases((prev) => ({
+      ...prev,
+      [selectedOrderKey]: [entry, ...(prev[selectedOrderKey] || [])],
+    }));
+    setNewPurchase({ supplier: '', netPurchaseUnitPrice: '', purchaseUnitPrice: '', netCost: '', purchaseAmount: '' });
+    setActiveEntryModal(null);
+  };
+
+  const handleDeliverySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedOrder) return;
+    const entry: OrderDeliveryEntry = {
+      id: `delivery-${Date.now()}`,
+      deliveryDate: newDelivery.deliveryDate,
+      deliveredQty: parseFloat(newDelivery.deliveredQty) || 0,
+      deliveredNetRevenue: parseFloat(newDelivery.deliveredNetRevenue) || 0,
+      deliveryValue: parseFloat(newDelivery.deliveryValue) || 0,
+      deliveredNetCost: parseFloat(newDelivery.deliveredNetCost) || 0,
+      deliveryCost: parseFloat(newDelivery.deliveryCost) || 0,
+      pendingQty: parseFloat(newDelivery.pendingQty) || 0,
+      pendingNetAmount: parseFloat(newDelivery.pendingNetAmount) || 0,
+      pendingAmount: parseFloat(newDelivery.pendingAmount) || 0,
+    };
+    setOrderDeliveries((prev) => ({
+      ...prev,
+      [selectedOrderKey]: [entry, ...(prev[selectedOrderKey] || [])],
+    }));
+    setNewDelivery({
+      deliveryDate: new Date().toISOString().split('T')[0],
+      deliveredQty: '',
+      deliveredNetRevenue: '',
+      deliveryValue: '',
+      deliveredNetCost: '',
+      deliveryCost: '',
+      pendingQty: '',
+      pendingNetAmount: '',
+      pendingAmount: '',
+    });
+    setActiveEntryModal(null);
   };
 
   return (
@@ -136,7 +379,12 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-sans">订单详情列表</h1>
           <p className="text-sm text-slate-500 font-sans mt-1">查看和管理全平台的客户订单与项目进度详情</p>
         </div>
-        <div className="flex items-center self-start sm:self-center">
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <label className="flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg shadow-sm transition-all text-xs font-semibold cursor-pointer">
+            <Upload className="w-4 h-4 text-slate-400" />
+            <span>批量导入</span>
+            <input type="file" accept=".csv,text/csv" onChange={handleBatchImport} className="hidden" />
+          </label>
           <button 
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold"
@@ -283,8 +531,14 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
                     </td>
                     <td className="px-6 py-4 text-xs text-center font-mono font-semibold text-slate-800">{item.deliveredQty}</td>
                     <td className="px-6 py-4 text-center">
-                      <button className="p-1 hover:bg-slate-100 rounded-md text-slate-400 hover:text-slate-600 transition-colors">
-                        <MoreVertical className="w-4 h-4" />
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrder(item)}
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-200 transition-colors"
+                        title="查看订单相关信息"
+                        aria-label={`查看订单 ${item.orderId} 的相关信息`}
+                      >
+                        <Eye className="w-4 h-4" />
                       </button>
                     </td>
                   </tr>
@@ -357,10 +611,252 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
         </div>
       </section>
 
+      {selectedOrder && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-6xl max-h-[88vh] overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-blue-600 mb-1">{selectedOrder.orderId}</p>
+                <h2 className="text-base font-bold text-slate-900 truncate">{selectedOrder.goodsName}</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedOrder(null);
+                  setActiveEntryModal(null);
+                }}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                aria-label="关闭订单详情"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto max-h-[calc(88vh-73px)]">
+              <section>
+                <h3 className="text-sm font-bold text-slate-900 mb-3">当前订单信息</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  {[
+                    ['全额/净额', selectedOrder.amountType || ''],
+                    ['项目编号', selectedOrder.projectId],
+                    ['部门', selectedOrder.department || ''],
+                    ['分公司', selectedOrder.branchCompany || ''],
+                    ['客户经理', selectedOrder.manager || ''],
+                    ['订单日期', selectedOrder.orderDate],
+                    ['业务类型', selectedOrder.businessType],
+                    ['统计类别', selectedOrder.statisticalCategory || ''],
+                    ['三级团队名称', selectedOrder.teamName || ''],
+                    ['客户单位名称', selectedOrder.clientUnit],
+                    ['用户', selectedOrder.userName || ''],
+                    ['区域平台', selectedOrder.regionalPlatform || ''],
+                    ['订单号', selectedOrder.orderId],
+                    ['项目名称', selectedOrder.projectName || ''],
+                    ['货物名称', selectedOrder.goodsName],
+                    ['规格型号', selectedOrder.specModel || ''],
+                    ['单位', selectedOrder.unitName || selectedOrder.quantity.replace(/^[\d.]+\s*/, '') || ''],
+                    ['数量', selectedOrder.quantity],
+                    ['不含税单价', formatOptionalMoney(selectedOrder.netUnitPrice)],
+                    ['单价', formatOptionalMoney(selectedOrder.unitPrice)],
+                    ['不含税收入', formatOptionalMoney(selectedOrder.netRevenue)],
+                    ['订单价值', `¥${formatMoney(selectedOrder.orderValue)}`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-[11px] font-medium text-slate-400">{label}</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-800 truncate min-h-[16px]" title={blank(value)}>
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-bold text-slate-900 mb-3">采购信息</h3>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full min-w-[720px] text-left">
+                    <thead className="bg-slate-50 text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2 font-semibold">采购厂商</th>
+                        <th className="px-4 py-2 font-semibold text-right">不含税采购单价</th>
+                        <th className="px-4 py-2 font-semibold text-right">采购单价</th>
+                        <th className="px-4 py-2 font-semibold text-right">不含税成本</th>
+                        <th className="px-4 py-2 font-semibold text-right">采购金额</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedPurchases.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center text-xs text-slate-400">暂无采购信息</td>
+                        </tr>
+                      ) : (
+                        selectedPurchases.map((item) => (
+                          <tr key={item.id} className="text-xs text-slate-700">
+                            <td className="px-4 py-2">{item.supplier}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.netPurchaseUnitPrice)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.purchaseUnitPrice)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.netCost)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.purchaseAmount)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-bold text-slate-900 mb-3">交付信息</h3>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full min-w-[980px] text-left">
+                    <thead className="bg-slate-50 text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2 font-semibold">交付日期</th>
+                        <th className="px-4 py-2 font-semibold text-right">交付数量</th>
+                        <th className="px-4 py-2 font-semibold text-right">交付不含税收入</th>
+                        <th className="px-4 py-2 font-semibold text-right">交付价值</th>
+                        <th className="px-4 py-2 font-semibold text-right">交付不含税成本</th>
+                        <th className="px-4 py-2 font-semibold text-right">交付成本</th>
+                        <th className="px-4 py-2 font-semibold text-right">待交付数量</th>
+                        <th className="px-4 py-2 font-semibold text-right">待交付金额（不含税）</th>
+                        <th className="px-4 py-2 font-semibold text-right">待交付金额</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedDeliveries.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} className="px-4 py-6 text-center text-xs text-slate-400">暂无交付信息</td>
+                        </tr>
+                      ) : (
+                        selectedDeliveries.map((item) => (
+                          <tr key={item.id} className="text-xs text-slate-700">
+                            <td className="px-4 py-2">{item.deliveryDate}</td>
+                            <td className="px-4 py-2 text-right font-mono">{blank(item.deliveredQty)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveredNetRevenue)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveryValue)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveredNetCost)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveryCost)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{blank(item.pendingQty)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.pendingNetAmount)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.pendingAmount)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setActiveEntryModal('purchase')}
+                  className="px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold"
+                >
+                  录入采购信息
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveEntryModal('delivery')}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold"
+                >
+                  录入交付信息
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedOrder && activeEntryModal === 'purchase' && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h2 className="text-sm font-bold text-slate-900">录入采购信息</h2>
+              <button type="button" onClick={() => setActiveEntryModal(null)} className="text-slate-400 hover:text-slate-600 text-lg font-semibold">
+                &times;
+              </button>
+            </div>
+            <form onSubmit={handlePurchaseSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">采购厂商 *</label>
+                  <input required value={newPurchase.supplier} onChange={e => setNewPurchase({...newPurchase, supplier: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">不含税采购单价</label>
+                  <input type="number" value={newPurchase.netPurchaseUnitPrice} onChange={e => setNewPurchase({...newPurchase, netPurchaseUnitPrice: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">采购单价</label>
+                  <input type="number" value={newPurchase.purchaseUnitPrice} onChange={e => setNewPurchase({...newPurchase, purchaseUnitPrice: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">不含税成本</label>
+                  <input type="number" value={newPurchase.netCost} onChange={e => setNewPurchase({...newPurchase, netCost: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">采购金额</label>
+                  <input type="number" value={newPurchase.purchaseAmount} onChange={e => setNewPurchase({...newPurchase, purchaseAmount: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                <button type="button" onClick={() => setActiveEntryModal(null)} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">保存采购信息</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {selectedOrder && activeEntryModal === 'delivery' && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h2 className="text-sm font-bold text-slate-900">录入交付信息</h2>
+              <button type="button" onClick={() => setActiveEntryModal(null)} className="text-slate-400 hover:text-slate-600 text-lg font-semibold">
+                &times;
+              </button>
+            </div>
+            <form onSubmit={handleDeliverySubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">交付日期</label>
+                  <input type="date" value={newDelivery.deliveryDate} onChange={e => setNewDelivery({...newDelivery, deliveryDate: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </div>
+                {[
+                  ['交付数量', 'deliveredQty'],
+                  ['交付不含税收入', 'deliveredNetRevenue'],
+                  ['交付价值', 'deliveryValue'],
+                  ['交付不含税成本', 'deliveredNetCost'],
+                  ['交付成本', 'deliveryCost'],
+                  ['待交付数量', 'pendingQty'],
+                  ['待交付金额（不含税）', 'pendingNetAmount'],
+                  ['待交付金额', 'pendingAmount'],
+                ].map(([label, key]) => (
+                  <div key={key} className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-600">{label}</label>
+                    <input
+                      type="number"
+                      value={newDelivery[key as keyof typeof newDelivery]}
+                      onChange={e => setNewDelivery({...newDelivery, [key]: e.target.value})}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                <button type="button" onClick={() => setActiveEntryModal(null)} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">保存交付信息</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Add New Order Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden transform transition-all scale-100 duration-150">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-5xl max-h-[88vh] overflow-hidden transform transition-all scale-100 duration-150">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <ShoppingBag className="w-4 h-4 text-blue-600" />
@@ -374,8 +870,20 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[calc(88vh-73px)]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">全额/净额</label>
+                  <select
+                    value={newOrder.amountType}
+                    onChange={e => setNewOrder({...newOrder, amountType: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 bg-white"
+                  >
+                    <option value="全额">全额</option>
+                    <option value="净额">净额</option>
+                  </select>
+                </div>
+
                 {/* Project Id */}
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-600">项目编号 *</label>
@@ -399,6 +907,36 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
                     value={newOrder.orderId}
                     onChange={e => setNewOrder({...newOrder, orderId: e.target.value})}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">部门</label>
+                  <input
+                    type="text"
+                    value={newOrder.department}
+                    onChange={e => setNewOrder({...newOrder, department: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">分公司</label>
+                  <input
+                    type="text"
+                    value={newOrder.branchCompany}
+                    onChange={e => setNewOrder({...newOrder, branchCompany: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">客户经理</label>
+                  <input
+                    type="text"
+                    value={newOrder.manager}
+                    onChange={e => setNewOrder({...newOrder, manager: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
                   />
                 </div>
 
@@ -427,9 +965,29 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
                   />
                 </div>
 
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">统计类别</label>
+                  <input
+                    type="text"
+                    value={newOrder.statisticalCategory}
+                    onChange={e => setNewOrder({...newOrder, statisticalCategory: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">三级团队名称</label>
+                  <input
+                    type="text"
+                    value={newOrder.teamName}
+                    onChange={e => setNewOrder({...newOrder, teamName: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
                 {/* Client Unit */}
-                <div className="col-span-2 space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">客户单位 *</label>
+                <div className="lg:col-span-2 space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">客户单位名称 *</label>
                   <input 
                     type="text" 
                     required
@@ -440,15 +998,55 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
                   />
                 </div>
 
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">用户</label>
+                  <input
+                    type="text"
+                    value={newOrder.userName}
+                    onChange={e => setNewOrder({...newOrder, userName: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">区域平台</label>
+                  <input
+                    type="text"
+                    value={newOrder.regionalPlatform}
+                    onChange={e => setNewOrder({...newOrder, regionalPlatform: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="lg:col-span-2 space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">项目名称</label>
+                  <input
+                    type="text"
+                    value={newOrder.projectName}
+                    onChange={e => setNewOrder({...newOrder, projectName: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
                 {/* Goods Name */}
-                <div className="col-span-2 space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">货物/服务名称 *</label>
+                <div className="lg:col-span-2 space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">货物名称 *</label>
                   <input 
                     type="text" 
                     required
                     placeholder="如: 网络安全态势感知平台软件"
                     value={newOrder.goodsName}
                     onChange={e => setNewOrder({...newOrder, goodsName: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="lg:col-span-2 space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">规格型号</label>
+                  <input
+                    type="text"
+                    value={newOrder.specModel}
+                    onChange={e => setNewOrder({...newOrder, specModel: e.target.value})}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
                   />
                 </div>
@@ -488,6 +1086,36 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
                     placeholder="0.00"
                     value={newOrder.orderValue}
                     onChange={e => setNewOrder({...newOrder, orderValue: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">不含税单价</label>
+                  <input
+                    type="number"
+                    value={newOrder.netUnitPrice}
+                    onChange={e => setNewOrder({...newOrder, netUnitPrice: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">单价</label>
+                  <input
+                    type="number"
+                    value={newOrder.unitPrice}
+                    onChange={e => setNewOrder({...newOrder, unitPrice: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">不含税收入</label>
+                  <input
+                    type="number"
+                    value={newOrder.netRevenue}
+                    onChange={e => setNewOrder({...newOrder, netRevenue: e.target.value})}
                     className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
                   />
                 </div>

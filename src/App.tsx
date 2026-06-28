@@ -41,6 +41,10 @@ function dateOnly(value: string | null | undefined) {
   return value ? value.slice(0, 10) : '';
 }
 
+function optionalNumber(value: number | null | undefined) {
+  return value === null || value === undefined ? undefined : Number(value);
+}
+
 function mapLedger(item: BackendProjectLedger): ProjectLedger {
   return {
     id: item.project_code,
@@ -59,15 +63,42 @@ function mapLedger(item: BackendProjectLedger): ProjectLedger {
 
 function mapOrder(item: BackendOrderRecord): OrderRecord {
   return {
+    amountType: item.amount_type || '',
     projectId: item.project_code,
+    projectName: item.project_name || '',
+    department: item.department || '',
+    branchCompany: item.branch_company || '',
+    manager: item.account_manager || '',
     orderId: item.order_no,
     orderDate: dateOnly(item.order_date),
+    statisticalCategory: item.statistical_category || '',
+    teamName: item.team_name || '',
     goodsName: item.goods_name || fallbackText,
+    userName: item.user_name || '',
+    regionalPlatform: item.regional_platform || '',
+    specModel: item.spec_model || '',
+    unitName: item.unit_name || '',
     quantity: `${Number(item.quantity || 0)} ${item.unit_name || ''}`.trim(),
+    netUnitPrice: optionalNumber(item.net_unit_price),
+    unitPrice: optionalNumber(item.unit_price),
+    netRevenue: optionalNumber(item.net_revenue),
     orderValue: Number(item.order_value || 0),
     deliveredQty: Number(item.delivery_quantity || 0),
     businessType: item.business_type || fallbackText,
     clientUnit: item.customer_unit_name || fallbackText,
+    supplierName: item.supplier_name || '',
+    purchaseUnitPriceNoTax: optionalNumber(item.purchase_unit_price_no_tax),
+    purchaseUnitPrice: optionalNumber(item.purchase_unit_price),
+    costNoTax: optionalNumber(item.cost_no_tax),
+    purchaseAmount: optionalNumber(item.purchase_amount),
+    deliveryDate: dateOnly(item.delivery_date),
+    deliveryRevenueNoTax: optionalNumber(item.delivery_revenue_no_tax),
+    deliveryValue: optionalNumber(item.delivery_value),
+    deliveryCostNoTax: optionalNumber(item.delivery_cost_no_tax),
+    deliveryCost: optionalNumber(item.delivery_cost),
+    pendingDeliveryQuantity: optionalNumber(item.pending_delivery_quantity),
+    pendingDeliveryAmountNoTax: optionalNumber(item.pending_delivery_amount_no_tax),
+    pendingDeliveryAmount: optionalNumber(item.pending_delivery_amount),
   };
 }
 
@@ -331,7 +362,15 @@ export default function App() {
           {currentScreen === 'dashboard' && (
             <DashboardScreen logs={logs} ledgers={ledgers} orders={orders} onNavigate={setCurrentScreen} />
           )}
-          {currentScreen === 'ledger' && <LedgerScreen ledgers={ledgers} onAddLedger={handleAddLedger} />}
+          {currentScreen === 'ledger' && (
+            <LedgerScreen
+              ledgers={ledgers}
+              orders={orders}
+              purchases={purchases}
+              sales={sales}
+              onAddLedger={handleAddLedger}
+            />
+          )}
           {currentScreen === 'orders' && <OrdersScreen orders={orders} onAddOrder={handleAddOrder} />}
           {currentScreen === 'purchases' && <PurchasesScreen purchases={purchases} onAddPurchase={handleAddPurchase} />}
           {currentScreen === 'sales' && <SalesScreen sales={sales} onAddSales={handleAddSales} />}

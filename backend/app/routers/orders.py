@@ -46,9 +46,88 @@ def list_orders(
         rows = conn.execute(
             text(
                 f"""
-                SELECT project_code, order_no, order_date, goods_name, unit_name, quantity,
-                       order_value, delivery_quantity, business_type, customer_unit_name
-                FROM v_order_line_finance
+                SELECT
+                       project_code,
+                       order_no,
+                       gross_net_type AS amount_type,
+                       department,
+                       branch_company,
+                       account_manager,
+                       order_date,
+                       business_type,
+                       statistic_category AS statistical_category,
+                       team_level3_name AS team_name,
+                       customer_unit_name,
+                       end_user_name AS user_name,
+                       regional_platform,
+                       project_name,
+                       goods_name,
+                       specification_model AS spec_model,
+                       unit_name,
+                       quantity,
+                       sales_unit_price_no_tax AS net_unit_price,
+                       sales_unit_price AS unit_price,
+                       revenue_no_tax AS net_revenue,
+                       order_value,
+                       supplier_name,
+                       purchase_unit_price_no_tax,
+                       purchase_unit_price,
+                       cost_no_tax,
+                       purchase_amount,
+                       delivery_date,
+                       delivery_quantity,
+                       delivery_revenue_no_tax,
+                       delivery_value,
+                       delivery_cost_no_tax,
+                       delivery_cost,
+                       pending_delivery_quantity,
+                       pending_delivery_amount_no_tax,
+                       pending_delivery_amount
+                FROM (
+                    SELECT
+                           p.project_code,
+                           so.order_no,
+                           so.gross_net_type,
+                           p.department,
+                           p.branch_company,
+                           p.account_manager,
+                           p.team_level3_name,
+                           p.end_user_name,
+                           p.regional_platform,
+                           so.order_date,
+                           so.business_type,
+                           so.statistic_category,
+                           p.customer_unit_name,
+                           p.project_name,
+                           ol.goods_name,
+                           ol.specification_model,
+                           ol.unit_name,
+                           ol.quantity,
+                           ol.sales_unit_price_no_tax,
+                           ol.sales_unit_price,
+                           ol.revenue_no_tax,
+                           ol.order_value,
+                           pi.supplier_name,
+                           pi.purchase_unit_price_no_tax,
+                           pi.purchase_unit_price,
+                           pi.cost_no_tax,
+                           pi.purchase_amount,
+                           dr.delivery_date,
+                           dr.delivery_quantity,
+                           dr.delivery_revenue_no_tax,
+                           dr.delivery_value,
+                           dr.delivery_cost_no_tax,
+                           dr.delivery_cost,
+                           dr.pending_delivery_quantity,
+                           dr.pending_delivery_amount_no_tax,
+                           dr.pending_delivery_amount
+                    FROM project p
+                    JOIN sales_order so ON so.project_id = p.id AND so.deleted_at IS NULL
+                    JOIN order_line ol ON ol.sales_order_id = so.id AND ol.deleted_at IS NULL
+                    LEFT JOIN purchase_info pi ON pi.order_line_id = ol.id AND pi.deleted_at IS NULL
+                    LEFT JOIN delivery_record dr ON dr.order_line_id = ol.id AND dr.deleted_at IS NULL
+                    WHERE p.deleted_at IS NULL
+                ) order_detail
                 WHERE {where_sql}
                 ORDER BY order_date DESC, order_no
                 LIMIT :limit OFFSET :offset
@@ -57,4 +136,3 @@ def list_orders(
             params,
         ).mappings().all()
     return {"total": int(total or 0), "items": clean_rows(rows)}
-
