@@ -75,6 +75,7 @@ export interface BackendOrderRecord {
 }
 
 export interface BackendPurchaseRecord {
+  order_line_id: number;
   project_code: string;
   order_no: string;
   account_manager: string | null;
@@ -87,7 +88,43 @@ export interface BackendPurchaseRecord {
   accounts_payable: number | null;
 }
 
+export interface BackendPurchaseContract {
+  id: number;
+  purchase_contract_no: string | null;
+  payment_terms: string | null;
+  performance_period: string | null;
+  signed_amount: number | null;
+  unsigned_amount: number | null;
+}
+
+export interface BackendPurchaseInvoice {
+  id: number;
+  phase_no: number;
+  received_invoice_date: string | null;
+  received_invoice_date_text: string | null;
+  invoice_no: string | null;
+  invoice_amount: number | null;
+}
+
+export interface BackendPurchasePayment {
+  id: number;
+  phase_no: number;
+  due_payment_date: string | null;
+  payment_date: string | null;
+  payment_date_text: string | null;
+  payment_voucher_no: string | null;
+  payment_amount: number | null;
+}
+
+export interface BackendPurchaseDetail {
+  summary: Record<string, string | number | null>;
+  contracts: BackendPurchaseContract[];
+  invoices: BackendPurchaseInvoice[];
+  payments: BackendPurchasePayment[];
+}
+
 export interface BackendSalesRecord {
+  order_line_id: number;
   project_code: string;
   order_no: string;
   account_manager: string | null;
@@ -98,6 +135,45 @@ export interface BackendSalesRecord {
   sales_invoice_amount: number | null;
   total_received: number | null;
   accounts_receivable: number | null;
+}
+
+export interface BackendSalesContract {
+  id: number;
+  contract_signed_date: string | null;
+  contract_signed_date_text: string | null;
+  sales_contract_no: string | null;
+  contract_value: number | null;
+  performance_period: string | null;
+  unsigned_contract_amount: number | null;
+}
+
+export interface BackendSalesInvoice {
+  id: number;
+  phase_no: number;
+  invoice_doc_no: string | null;
+  invoice_date: string | null;
+  invoice_date_text: string | null;
+  invoice_no: string | null;
+  invoice_amount: number | null;
+  pending_invoice_amount: number | null;
+  delivered_not_invoiced_amount: number | null;
+}
+
+export interface BackendSalesReceipt {
+  id: number;
+  phase_no: number;
+  receipt_date: string | null;
+  receipt_date_text: string | null;
+  payment_notice_no: string | null;
+  receipt_amount: number | null;
+  receipt_ratio: number | null;
+}
+
+export interface BackendSalesDetail {
+  summary: Record<string, string | number | null>;
+  contracts: BackendSalesContract[];
+  invoices: BackendSalesInvoice[];
+  receipts: BackendSalesReceipt[];
 }
 
 export interface BackendOperationLog {
@@ -158,8 +234,24 @@ export const api = {
     request<PageResult<BackendOrderRecord>>(`/orders${query(params)}`),
   purchases: (params: Record<string, string | number | undefined> = {}) =>
     request<PageResult<BackendPurchaseRecord>>(`/purchases${query(params)}`),
+  purchaseDetail: (orderLineId: number) => request<BackendPurchaseDetail>(`/purchases/${orderLineId}`),
+  addPurchaseContract: (orderLineId: number, data: Record<string, string | number | null>) =>
+    request<BackendPurchaseDetail>(`/purchases/${orderLineId}/contracts`, { method: 'POST', body: JSON.stringify(data) }),
+  addPurchaseInvoice: (orderLineId: number, data: Record<string, string | number | null>) =>
+    request<BackendPurchaseDetail>(`/purchases/${orderLineId}/invoices`, { method: 'POST', body: JSON.stringify(data) }),
+  addPurchasePayment: (orderLineId: number, data: Record<string, string | number | null>) =>
+    request<BackendPurchaseDetail>(`/purchases/${orderLineId}/payments`, { method: 'POST', body: JSON.stringify(data) }),
   sales: (params: Record<string, string | number | undefined> = {}) =>
     request<PageResult<BackendSalesRecord>>(`/sales${query(params)}`),
+  salesDetail: (orderLineId: number) => request<BackendSalesDetail>(`/sales/${orderLineId}`),
+  salesDetailByOrder: (projectId: string, orderId: string) =>
+    request<BackendSalesDetail>(`/sales/by-order${query({ project_id: projectId, order_id: orderId })}`),
+  addSalesContract: (orderLineId: number, data: Record<string, string | number | null>) =>
+    request<BackendSalesDetail>(`/sales/${orderLineId}/contracts`, { method: 'POST', body: JSON.stringify(data) }),
+  addSalesInvoice: (orderLineId: number, data: Record<string, string | number | null>) =>
+    request<BackendSalesDetail>(`/sales/${orderLineId}/invoices`, { method: 'POST', body: JSON.stringify(data) }),
+  addSalesReceipt: (orderLineId: number, data: Record<string, string | number | null>) =>
+    request<BackendSalesDetail>(`/sales/${orderLineId}/receipts`, { method: 'POST', body: JSON.stringify(data) }),
   logs: () => request<PageResult<BackendOperationLog>>('/logs?limit=100'),
   backups: () => request<PageResult<BackendBackupInfo>>('/backups?limit=100'),
 };

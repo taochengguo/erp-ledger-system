@@ -104,6 +104,7 @@ function mapOrder(item: BackendOrderRecord): OrderRecord {
 
 function mapPurchase(item: BackendPurchaseRecord): PurchaseRecord {
   return {
+    orderLineId: item.order_line_id,
     projectId: item.project_code,
     orderId: item.order_no,
     manager: item.account_manager || fallbackText,
@@ -118,6 +119,7 @@ function mapPurchase(item: BackendPurchaseRecord): PurchaseRecord {
 
 function mapSale(item: BackendSalesRecord): SalesRecord {
   return {
+    orderLineId: item.order_line_id,
     projectId: item.project_code,
     orderId: item.order_no,
     manager: item.account_manager || fallbackText,
@@ -126,6 +128,8 @@ function mapSale(item: BackendSalesRecord): SalesRecord {
     contractDate: dateOnly(item.sales_contract_signed_date),
     contractValue: Number(item.sales_contract_value || 0),
     invoiceAmount: Number(item.sales_invoice_amount || 0),
+    totalReceived: Number(item.total_received || 0),
+    accountsReceivable: Number(item.accounts_receivable || 0),
   };
 }
 
@@ -211,11 +215,6 @@ export default function App() {
   const handleAddOrder = (newItem: OrderRecord) => {
     setOrders((prev) => [newItem, ...prev]);
     addLog('订单管理', `本地录入订单 "${newItem.orderId}"`);
-  };
-
-  const handleAddPurchase = (newItem: PurchaseRecord) => {
-    setPurchases((prev) => [newItem, ...prev]);
-    addLog('采购管理', `本地新增采购合同 ${newItem.contractNo}`);
   };
 
   const handleAddSales = (newItem: SalesRecord) => {
@@ -372,8 +371,8 @@ export default function App() {
             />
           )}
           {currentScreen === 'orders' && <OrdersScreen orders={orders} onAddOrder={handleAddOrder} />}
-          {currentScreen === 'purchases' && <PurchasesScreen purchases={purchases} onAddPurchase={handleAddPurchase} />}
-          {currentScreen === 'sales' && <SalesScreen sales={sales} onAddSales={handleAddSales} />}
+          {currentScreen === 'purchases' && <PurchasesScreen purchases={purchases} />}
+          {currentScreen === 'sales' && <SalesScreen sales={sales} />}
           {currentScreen === 'system' && (
             <SystemScreen logs={logs} backups={backups} onAddBackup={handleAddBackup} onRefresh={handleRefreshAll} />
           )}

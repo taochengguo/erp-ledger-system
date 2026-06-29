@@ -56,6 +56,7 @@ export interface OrderRecord {
 }
 
 export interface PurchaseRecord {
+  orderLineId?: number; // 订单明细ID
   projectId: string; // 项目编号
   orderId: string; // 订单号
   manager: string; // 客户经理
@@ -68,6 +69,7 @@ export interface PurchaseRecord {
 }
 
 export interface SalesRecord {
+  orderLineId?: number; // 订单明细ID
   projectId: string; // 项目编号
   orderId: string; // 订单号
   manager: string; // 客户经理
@@ -76,6 +78,8 @@ export interface SalesRecord {
   contractDate: string; // 合同签订日期
   contractValue: number; // 合同价值
   invoiceAmount: number; // 开票金额
+  totalReceived?: number; // 回款合计
+  accountsReceivable?: number; // 应收款
 }
 
 export interface OperationLog {
