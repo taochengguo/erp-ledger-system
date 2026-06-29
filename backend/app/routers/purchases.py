@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from ..auth import CurrentUser, require_permission
 from ..db import db
 from ..serializers import clean_row, clean_rows
 
@@ -142,7 +143,11 @@ def get_purchase_detail(order_line_id: int) -> dict:
 
 
 @router.post("/{order_line_id}/contracts")
-def add_purchase_contract(order_line_id: int, payload: PurchaseContractCreate) -> dict:
+def add_purchase_contract(
+    order_line_id: int,
+    payload: PurchaseContractCreate,
+    _: CurrentUser = Depends(require_permission("purchase_entry")),
+) -> dict:
     _ensure_order_line(order_line_id)
     with db() as conn:
         conn.execute(
@@ -162,7 +167,11 @@ def add_purchase_contract(order_line_id: int, payload: PurchaseContractCreate) -
 
 
 @router.post("/{order_line_id}/invoices")
-def add_purchase_invoice(order_line_id: int, payload: PurchaseInvoiceCreate) -> dict:
+def add_purchase_invoice(
+    order_line_id: int,
+    payload: PurchaseInvoiceCreate,
+    _: CurrentUser = Depends(require_permission("purchase_entry")),
+) -> dict:
     _ensure_order_line(order_line_id)
     with db() as conn:
         phase_no = _next_phase(conn, "purchase_invoice", order_line_id)
@@ -183,7 +192,11 @@ def add_purchase_invoice(order_line_id: int, payload: PurchaseInvoiceCreate) -> 
 
 
 @router.post("/{order_line_id}/payments")
-def add_purchase_payment(order_line_id: int, payload: PurchasePaymentCreate) -> dict:
+def add_purchase_payment(
+    order_line_id: int,
+    payload: PurchasePaymentCreate,
+    _: CurrentUser = Depends(require_permission("purchase_entry")),
+) -> dict:
     _ensure_order_line(order_line_id)
     with db() as conn:
         phase_no = _next_phase(conn, "purchase_payment", order_line_id)

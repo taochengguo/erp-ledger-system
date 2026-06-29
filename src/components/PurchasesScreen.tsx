@@ -16,6 +16,7 @@ import { PurchaseRecord } from '../types';
 
 interface PurchasesScreenProps {
   purchases: PurchaseRecord[];
+  canEnterPurchases: boolean;
 }
 
 type EntryMode = 'contract' | 'invoice' | 'payment';
@@ -41,7 +42,7 @@ function parseAmount(value: string) {
   return value === '' ? null : Number(value);
 }
 
-export default function PurchasesScreen({ purchases }: PurchasesScreenProps) {
+export default function PurchasesScreen({ purchases, canEnterPurchases }: PurchasesScreenProps) {
   const [projectId, setProjectId] = useState('');
   const [orderId, setOrderId] = useState('');
   const [manager, setManager] = useState('');
@@ -384,11 +385,11 @@ export default function PurchasesScreen({ purchases }: PurchasesScreenProps) {
                     ))}
                   </DataBlock>
 
-                  <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-100">
+                  {canEnterPurchases && <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-100">
                     <EntryButton icon={<FileText className="w-4 h-4" />} label="录入采购合同" onClick={() => setEntryMode('contract')} />
                     <EntryButton icon={<ReceiptText className="w-4 h-4" />} label="录入收票情况" onClick={() => setEntryMode('invoice')} />
                     <EntryButton icon={<CreditCard className="w-4 h-4" />} label="录入付款情况" onClick={() => setEntryMode('payment')} />
-                  </div>
+                  </div>}
                 </>
               )}
             </div>

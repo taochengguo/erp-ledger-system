@@ -1,5 +1,11 @@
 const API_BASE = ((import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_API_BASE_URL) || '/api';
 
+let authToken = '';
+
+export function setApiToken(token: string) {
+  authToken = token;
+}
+
 export interface BackendHealth {
   status: string;
   database: string;
@@ -196,14 +202,37 @@ export interface BackendBackupInfo {
   backup_time: string;
 }
 
+export interface BackendAuthUser {
+  id: number;
+  username: string;
+  display_name: string;
+  role_code: string;
+  role_label: string;
+  permissions: string[];
+}
+
+export interface BackendUserRecord {
+  id: number;
+  username: string;
+  display_name: string;
+  role_code: string;
+  is_active: number | boolean;
+  last_login_at: string | null;
+  created_at: string;
+}
+
 export interface PageResult<T> {
   total: number;
   items: T[];
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...init,
   });
   if (!response.ok) {
@@ -225,6 +254,16 @@ function query(params: Record<string, string | number | undefined>) {
 }
 
 export const api = {
+  setToken: setApiToken,
+  login: (data: { username: string; password: string }) =>
+    request<{ access_token: string; token_type: string; user: BackendAuthUser }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  me: () => request<{ user: BackendAuthUser }>('/auth/me'),
+  users: () => request<{ items: BackendUserRecord[] }>('/auth/users'),
+  createUser: (data: { username: string; password: string; display_name: string; role_code: string }) =>
+    request<{ items: BackendUserRecord[] }>('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
   health: () => request<BackendHealth>('/health'),
   importExcel: () => request<{ success_rows: number; failed_rows: number }>('/import/excel', { method: 'POST' }),
   dashboardSummary: () => request<BackendDashboardSummary>('/dashboard/summary'),

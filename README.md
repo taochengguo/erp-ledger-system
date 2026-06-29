@@ -56,6 +56,21 @@ Open:
 - Frontend: http://127.0.0.1:3000
 - Backend health: http://127.0.0.1:8000/api/health
 
+Default login:
+
+- Username: `admin`
+- Password: `admin123`
+
+The backend creates this default administrator on first startup if `erp_user` has no `admin` account. Change `DEFAULT_ADMIN_PASSWORD` and `AUTH_SECRET` in `backend/.env` for local deployment.
+
+## Permissions
+
+- `admin`: account management, system import, backup actions, order entry, purchase entry, and sales entry.
+- `order_entry`: order detail entry and batch order import only.
+- `purchase_entry`: purchase contract, invoice, and payment entry only.
+- `sales_entry`: sales contract, invoice, and receipt entry only.
+- `viewer`: read-only access.
+
 ## Data Rules
 
 - `project.project_code` is unique.

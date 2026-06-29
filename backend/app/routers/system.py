@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
+from ..auth import CurrentUser, require_permission
 from ..db import db
 from ..importer import import_excel
 from ..serializers import clean_rows
@@ -11,7 +12,7 @@ router = APIRouter(tags=["system"])
 
 
 @router.post("/api/import/excel")
-def run_import() -> dict:
+def run_import(_: CurrentUser = Depends(require_permission("system_admin"))) -> dict:
     with db() as conn:
         return import_excel(conn, reset=True)
 
@@ -50,4 +51,3 @@ def backups(limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0))
             {"limit": limit, "offset": offset},
         ).mappings().all()
     return {"total": int(total or 0), "items": clean_rows(rows)}
-

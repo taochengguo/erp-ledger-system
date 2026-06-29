@@ -14,6 +14,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { OperationLog, OrderRecord, ProjectLedger, ScreenType } from '../types';
+import { getDashboardDepartments, getDashboardMetrics } from '../lib/dashboardMetrics';
 
 interface DashboardScreenProps {
   logs: OperationLog[];
@@ -70,6 +71,7 @@ function smoothPath(points: TrendPoint[]) {
 export default function DashboardScreen({ logs, ledgers, orders, onNavigate }: DashboardScreenProps) {
   const [timeStr, setTimeStr] = useState('');
   const [hoveredTrendIndex, setHoveredTrendIndex] = useState<number | null>(null);
+  const [selectedDepartment, setSelectedDepartment] = useState('');
 
   useEffect(() => {
     const updateTime = () => {
@@ -86,13 +88,8 @@ export default function DashboardScreen({ logs, ledgers, orders, onNavigate }: D
     return () => window.clearInterval(interval);
   }, []);
 
-  const totalOrderAmount = ledgers.reduce((sum, item) => sum + item.orderAmount, 0);
-  const grossProfit = ledgers.reduce((sum, item) => sum + (item.orderAmount - item.purchaseAmount), 0);
-  const accountsReceivable = ledgers.reduce((sum, item) => sum + Math.max(item.orderAmount - item.totalReceived, 0), 0);
-  const accountsPayable = ledgers.reduce((sum, item) => sum + Math.max(item.purchaseAmount - item.totalReceived, 0), 0);
-  const closedCount = ledgers.filter(
-    (item) => item.orderStatus === 'closed' || item.orderStatus.includes('关') || item.orderStatus.includes('闭'),
-  ).length;
+  const departmentOptions = getDashboardDepartments(ledgers);
+  const dashboardMetrics = getDashboardMetrics({ ledgers, orders, department: selectedDepartment });
   const recentLogs = logs.slice(0, 5);
 
   const trendTotals = new Map<string, { orderAmount: number; profit: number }>();
@@ -137,12 +134,12 @@ export default function DashboardScreen({ logs, ledgers, orders, onNavigate }: D
   const maxDepartmentAmount = Math.max(...departmentRanking.map((item) => item.amount), 1);
 
   const metrics = [
-    { label: '订单总金额', value: compactMoney(totalOrderAmount), icon: Wallet, trend: '实时', trendType: 'up' },
-    { label: '毛利润', value: compactMoney(grossProfit), icon: TrendingUp, trend: '实时', trendType: 'up' },
-    { label: '订单总数', value: orders.length.toLocaleString('zh-CN'), icon: ShoppingCart, trend: '实时', trendType: 'up' },
-    { label: '应收账款', value: compactMoney(accountsReceivable), icon: ArrowDownLeft, trend: '实时', trendType: 'down' },
-    { label: '应付账款', value: compactMoney(accountsPayable), icon: ArrowUpRight, trend: '实时', trendType: 'flat' },
-    { label: '已关闭订单', value: closedCount.toLocaleString('zh-CN'), icon: CheckCircle2, trend: '实时', trendType: 'up' },
+    { label: '订单总金额', value: compactMoney(dashboardMetrics.totalOrderAmount), icon: Wallet, trend: '实时', trendType: 'up' },
+    { label: '毛利润', value: compactMoney(dashboardMetrics.grossProfit), icon: TrendingUp, trend: '实时', trendType: 'up' },
+    { label: '订单总数', value: dashboardMetrics.orderCount.toLocaleString('zh-CN'), icon: ShoppingCart, trend: '实时', trendType: 'up' },
+    { label: '应收账款', value: compactMoney(dashboardMetrics.accountsReceivable), icon: ArrowDownLeft, trend: '实时', trendType: 'down' },
+    { label: '应付账款', value: compactMoney(dashboardMetrics.accountsPayable), icon: ArrowUpRight, trend: '实时', trendType: 'flat' },
+    { label: '已关闭订单', value: dashboardMetrics.closedCount.toLocaleString('zh-CN'), icon: CheckCircle2, trend: '实时', trendType: 'up' },
   ] as const;
 
   return (
@@ -152,7 +149,24 @@ export default function DashboardScreen({ logs, ledgers, orders, onNavigate }: D
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-sans">仪表盘概览</h1>
           <p className="text-sm text-slate-500 font-sans mt-1">欢迎回来，这是今天的业务实时动态。</p>
         </div>
-        <div className="flex items-center self-start sm:self-center">
+        <div className="flex flex-wrap items-center gap-3 self-start sm:self-center">
+          <label className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-sm text-xs">
+            <Filter className="w-4 h-4 text-blue-600" />
+            <span className="font-medium text-slate-500">部门</span>
+            <select
+              value={selectedDepartment}
+              onChange={(event) => setSelectedDepartment(event.target.value)}
+              className="bg-transparent outline-none text-slate-800 font-medium cursor-pointer min-w-[92px]"
+              aria-label="按部门筛选仪表盘指标"
+            >
+              <option value="">全部部门</option>
+              {departmentOptions.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg shadow-sm transition-colors text-xs font-mono">
             <Calendar className="w-4 h-4 text-slate-400" />
             <span>{timeStr || '加载中...'}</span>

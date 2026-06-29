@@ -22,6 +22,7 @@ class Settings:
     mysql_password: str = os.getenv("MYSQL_PASSWORD", "")
     mysql_database: str = os.getenv("MYSQL_DATABASE", "erp_ledger")
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://127.0.0.1:3000")
+    auth_secret: str = os.getenv("AUTH_SECRET", "erp-ledger-local-dev-secret")
 
     @property
     def server_url(self) -> str:

@@ -9,8 +9,11 @@ import {
   HardDrive,
   FileArchive,
   Terminal,
-  Activity
+  Activity,
+  UserPlus
 } from 'lucide-react';
+import { BackendUserRecord } from '../api';
+import { ROLE_LABELS, RoleCode } from '../lib/permissions';
 import { OperationLog, BackupInfo } from '../types';
 
 interface SystemScreenProps {
@@ -18,15 +21,25 @@ interface SystemScreenProps {
   backups: BackupInfo[];
   onAddBackup: (backup: BackupInfo) => void;
   onRefresh: () => void;
+  users: BackendUserRecord[];
+  canManageUsers: boolean;
+  onCreateUser: (data: { username: string; password: string; display_name: string; role_code: string }) => Promise<void>;
 }
 
-export default function SystemScreen({ logs, backups, onAddBackup, onRefresh }: SystemScreenProps) {
+export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, users, canManageUsers, onCreateUser }: SystemScreenProps) {
   // Pagination State for Logs
   const [logPage, setLogPage] = useState(1);
   const itemsPerPage = 5;
 
   // Pagination State for Backups
   const [backupPage, setBackupPage] = useState(1);
+  const [userForm, setUserForm] = useState({
+    username: '',
+    password: '',
+    display_name: '',
+    role_code: 'viewer',
+  });
+  const [userMessage, setUserMessage] = useState('');
 
   // Filter logs & backups to show only 5 items per page
   const paginatedLogs = useMemo(() => {
@@ -70,6 +83,18 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh }: 
     }
   };
 
+  const handleUserSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setUserMessage('');
+    try {
+      await onCreateUser(userForm);
+      setUserForm({ username: '', password: '', display_name: '', role_code: 'viewer' });
+      setUserMessage('账号创建成功');
+    } catch (error) {
+      setUserMessage(error instanceof Error ? error.message : '账号创建失败');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -91,6 +116,71 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh }: 
           </button>
         </div>
       </div>
+
+      {canManageUsers && (
+        <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+            <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-1.5">
+              <UserPlus className="w-4 h-4 text-blue-600" />
+              <span>账号与权限管理</span>
+            </h3>
+            {userMessage && <span className="text-xs font-medium text-blue-600">{userMessage}</span>}
+          </div>
+
+          <div className="p-5 grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-5">
+            <form onSubmit={handleUserSubmit} className="rounded-lg border border-slate-200 p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="block text-xs font-semibold text-slate-600">登录账号</span>
+                  <input required value={userForm.username} onChange={(e) => setUserForm({ ...userForm, username: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-xs font-semibold text-slate-600">显示名称</span>
+                  <input required value={userForm.display_name} onChange={(e) => setUserForm({ ...userForm, display_name: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-xs font-semibold text-slate-600">初始密码</span>
+                  <input required type="password" minLength={6} value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-xs font-semibold text-slate-600">权限角色</span>
+                  <select value={userForm.role_code} onChange={(e) => setUserForm({ ...userForm, role_code: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 bg-white">
+                    {(Object.keys(ROLE_LABELS) as RoleCode[]).map((roleCode) => (
+                      <option key={roleCode} value={roleCode}>{ROLE_LABELS[roleCode]}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <button type="submit" className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">创建账号</button>
+            </form>
+
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[720px] text-left">
+                <thead className="bg-slate-50 text-xs text-slate-500">
+                  <tr>
+                    <th className="px-4 py-2 font-semibold">账号</th>
+                    <th className="px-4 py-2 font-semibold">姓名</th>
+                    <th className="px-4 py-2 font-semibold">角色</th>
+                    <th className="px-4 py-2 font-semibold">状态</th>
+                    <th className="px-4 py-2 font-semibold">最后登录</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {users.map((user) => (
+                    <tr key={user.id} className="text-xs text-slate-700">
+                      <td className="px-4 py-2 font-mono text-blue-600">{user.username}</td>
+                      <td className="px-4 py-2 font-semibold">{user.display_name}</td>
+                      <td className="px-4 py-2">{ROLE_LABELS[user.role_code as RoleCode] || user.role_code}</td>
+                      <td className="px-4 py-2">{user.is_active ? '启用' : '停用'}</td>
+                      <td className="px-4 py-2 font-mono text-slate-400">{user.last_login_at || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* 1. Operation Log Section with 5 per page pagination */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
@@ -167,22 +257,24 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh }: 
             <Database className="w-4 h-4 text-blue-600" />
             <span>备份信息</span>
           </h3>
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            <button 
-              onClick={handleImmediateBackup}
-              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-xs font-semibold"
-            >
-              <HardDrive className="w-3.5 h-3.5" />
-              <span>立即备份</span>
-            </button>
-            <button 
-              onClick={() => alert('已将备份文件归档至异地容灾服务器！')}
-              className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors text-xs font-semibold"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>系统恢复</span>
-            </button>
-          </div>
+          {canManageUsers && (
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <button 
+                onClick={handleImmediateBackup}
+                className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-xs font-semibold"
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>立即备份</span>
+              </button>
+              <button 
+                onClick={() => alert('已将备份文件归档至异地容灾服务器！')}
+                className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors text-xs font-semibold"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>系统恢复</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto">

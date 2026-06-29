@@ -7,10 +7,12 @@ import {
   ChevronRight, 
   ShoppingBag,
   Upload,
+  Download,
   Eye,
   X
 } from 'lucide-react';
 import { OrderRecord } from '../types';
+import { ORDER_IMPORT_TEMPLATE_CSV, parseOrderImportCsv } from '../lib/orderImportTemplate';
 
 interface OrderPurchaseEntry {
   id: string;
@@ -37,6 +39,7 @@ interface OrderDeliveryEntry {
 interface OrdersScreenProps {
   orders: OrderRecord[];
   onAddOrder: (order: OrderRecord) => void;
+  canEnterOrders: boolean;
 }
 
 function getPaginationItems(totalPages: number): Array<number | 'ellipsis'> {
@@ -46,7 +49,7 @@ function getPaginationItems(totalPages: number): Array<number | 'ellipsis'> {
   return [1, 2, 'ellipsis', totalPages - 1, totalPages];
 }
 
-export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) {
+export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: OrdersScreenProps) {
   // Query Filters State
   const [projectId, setProjectId] = useState('');
   const [orderId, setOrderId] = useState('');
@@ -261,59 +264,26 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
     setCurrentPage(1);
   };
 
-  const parseCsvLine = (line: string) => line.split(',').map((value) => value.trim().replace(/^"|"$/g, ''));
+  const handleDownloadTemplate = () => {
+    const blob = new Blob([`\uFEFF${ORDER_IMPORT_TEMPLATE_CSV}`], { type: 'text/csv;charset=utf-8' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = '订单批量导入模板.csv';
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
 
   const handleBatchImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const content = await file.text();
-    const [headerLine, ...rows] = content.split(/\r?\n/).filter(Boolean);
-    const headers = parseCsvLine(headerLine);
-    let imported = 0;
-
-    rows.forEach((row) => {
-      const values = parseCsvLine(row);
-      const data = headers.reduce<Record<string, string>>((acc, header, index) => {
-        acc[header] = values[index] || '';
-        return acc;
-      }, {});
-      const project = data['项目编号'] || data.projectId;
-      const order = data['订单号'] || data.orderId;
-      const goods = data['货物名称'] || data['货物/服务名称'] || data.goodsName;
-      const client = data['客户单位名称'] || data['客户单位'] || data.clientUnit;
-      if (!project || !order || !goods || !client) return;
-
-      onAddOrder({
-        amountType: data['全额/净额'] || data.amountType || '全额',
-        projectId: project,
-        department: data['部门'] || '',
-        branchCompany: data['分公司'] || '',
-        manager: data['客户经理'] || '',
-        orderId: order,
-        orderDate: data['订单日期'] || new Date().toISOString().split('T')[0],
-        businessType: data['业务类型'] || '',
-        statisticalCategory: data['统计类别'] || '',
-        teamName: data['三级团队名称'] || '',
-        clientUnit: client,
-        userName: data['用户'] || '',
-        regionalPlatform: data['区域平台'] || '',
-        projectName: data['项目名称'] || '',
-        goodsName: goods,
-        specModel: data['规格型号'] || '',
-        unitName: data['单位'] || '',
-        quantity: `${data['数量'] || '0'} ${data['单位'] || ''}`.trim(),
-        netUnitPrice: parseFloat(data['不含税单价']) || 0,
-        unitPrice: parseFloat(data['单价']) || 0,
-        netRevenue: parseFloat(data['不含税收入']) || 0,
-        orderValue: parseFloat(data['订单价值']) || 0,
-        deliveredQty: 0,
-      });
-      imported++;
-    });
+    const importedOrders = parseOrderImportCsv(content, new Date().toISOString().split('T')[0]);
+    importedOrders.forEach(onAddOrder);
 
     event.target.value = '';
     setCurrentPage(1);
-    alert(`批量导入完成：成功导入 ${imported} 条客户订单。`);
+    alert(`批量导入完成：成功导入 ${importedOrders.length} 条客户订单。`);
   };
 
   const handlePurchaseSubmit = (e: React.FormEvent) => {
@@ -380,18 +350,30 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
           <p className="text-sm text-slate-500 font-sans mt-1">查看和管理全平台的客户订单与项目进度详情</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-center">
-          <label className="flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg shadow-sm transition-all text-xs font-semibold cursor-pointer">
-            <Upload className="w-4 h-4 text-slate-400" />
-            <span>批量导入</span>
-            <input type="file" accept=".csv,text/csv" onChange={handleBatchImport} className="hidden" />
-          </label>
-          <button 
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold"
+          <button
+            type="button"
+            onClick={handleDownloadTemplate}
+            className="flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg shadow-sm transition-all text-xs font-semibold"
           >
-            <Plus className="w-4 h-4" />
-            <span>新增订单</span>
+            <Download className="w-4 h-4 text-slate-400" />
+            <span>下载模板</span>
           </button>
+          {canEnterOrders && (
+            <>
+              <label className="flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg shadow-sm transition-all text-xs font-semibold cursor-pointer">
+                <Upload className="w-4 h-4 text-slate-400" />
+                <span>批量导入</span>
+                <input type="file" accept=".csv,text/csv" onChange={handleBatchImport} className="hidden" />
+              </label>
+              <button 
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold"
+              >
+                <Plus className="w-4 h-4" />
+                <span>新增订单</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -746,7 +728,7 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
                 </div>
               </section>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              {canEnterOrders && <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setActiveEntryModal('purchase')}
@@ -761,7 +743,7 @@ export default function OrdersScreen({ orders, onAddOrder }: OrdersScreenProps) 
                 >
                   录入交付信息
                 </button>
-              </div>
+              </div>}
             </div>
           </div>
         </div>

@@ -7,6 +7,7 @@ import {
   DollarSign,
   Settings,
   Menu,
+  LogOut,
 } from 'lucide-react';
 import {
   ProjectLedger,
@@ -20,12 +21,15 @@ import {
 import {
   api,
   BackendBackupInfo,
+  BackendAuthUser,
   BackendOperationLog,
   BackendOrderRecord,
   BackendProjectLedger,
   BackendPurchaseRecord,
   BackendSalesRecord,
+  BackendUserRecord,
 } from './api';
+import { AuthUser, hasPermission, normalizeUser } from './lib/permissions';
 
 import DashboardScreen from './components/DashboardScreen';
 import LedgerScreen from './components/LedgerScreen';
@@ -153,6 +157,10 @@ function mapBackup(item: BackendBackupInfo): BackupInfo {
   };
 }
 
+function mapAuthUser(item: BackendAuthUser): AuthUser {
+  return normalizeUser(item);
+}
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -162,10 +170,14 @@ export default function App() {
   const [sales, setSales] = useState<SalesRecord[]>([]);
   const [logs, setLogs] = useState<OperationLog[]>([]);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [users, setUsers] = useState<BackendUserRecord[]>([]);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginError, setLoginError] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
   const [error, setError] = useState('');
 
-  async function loadBackendData() {
+  async function loadBackendData(user = currentUser) {
     setError('');
     try {
       const [, ledgerData, orderData, purchaseData, salesData, logData, backupData] = await Promise.all([
@@ -185,20 +197,74 @@ export default function App() {
       setLogs(logData.items.map(mapLog));
       setBackups(backupData.items.map(mapBackup));
       setLastUpdated(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+      if (user && hasPermission(user, 'system_admin')) {
+        const userData = await api.users();
+        setUsers(userData.items);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '后端数据加载失败');
     }
   }
 
   useEffect(() => {
-    loadBackendData();
+    const token = window.localStorage.getItem('erp_auth_token');
+    if (!token) {
+      setAuthLoading(false);
+      return;
+    }
+    api.setToken(token);
+    api.me()
+      .then(({ user }) => {
+        const mappedUser = mapAuthUser(user);
+        setCurrentUser(mappedUser);
+        void loadBackendData(mappedUser);
+      })
+      .catch(() => {
+        window.localStorage.removeItem('erp_auth_token');
+        api.setToken('');
+      })
+      .finally(() => setAuthLoading(false));
   }, []);
+
+  const handleLogin = async (username: string, password: string) => {
+    setLoginError('');
+    try {
+      const result = await api.login({ username, password });
+      api.setToken(result.access_token);
+      window.localStorage.setItem('erp_auth_token', result.access_token);
+      const mappedUser = mapAuthUser(result.user);
+      setCurrentUser(mappedUser);
+      setAuthLoading(false);
+      await loadBackendData(mappedUser);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : '登录失败');
+    }
+  };
+
+  const handleLogout = () => {
+    window.localStorage.removeItem('erp_auth_token');
+    api.setToken('');
+    setCurrentUser(null);
+    setUsers([]);
+    setLedgers([]);
+    setOrders([]);
+    setPurchases([]);
+    setSales([]);
+    setLogs([]);
+    setBackups([]);
+    setLastUpdated('');
+  };
+
+  const handleCreateUser = async (data: { username: string; password: string; display_name: string; role_code: string }) => {
+    const result = await api.createUser(data);
+    setUsers(result.items);
+  };
 
   const addLog = (module: string, details: string) => {
     const now = new Date();
     const newLog: OperationLog = {
       id: `local-${Date.now()}`,
-      user: '当前用户 (管理员)',
+      user: currentUser ? `${currentUser.displayName} (${currentUser.roleLabel})` : '当前用户',
       module,
       details,
       status: '成功',
@@ -247,6 +313,19 @@ export default function App() {
     sales: '销售详情',
     system: '系统管理',
   };
+
+  if (authLoading) {
+    return <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center text-sm">正在检查登录状态...</div>;
+  }
+
+  if (!currentUser) {
+    return <LoginScreen error={loginError} onLogin={handleLogin} />;
+  }
+
+  const canEnterOrders = hasPermission(currentUser, 'order_entry');
+  const canEnterPurchases = hasPermission(currentUser, 'purchase_entry');
+  const canEnterSales = hasPermission(currentUser, 'sales_entry');
+  const canManageSystem = hasPermission(currentUser, 'system_admin');
 
   return (
     <div className="min-h-screen bg-[#F3F4F6] flex font-sans text-slate-900 select-none overflow-hidden">
@@ -313,8 +392,8 @@ export default function App() {
           </div>
           {!sidebarCollapsed && (
             <div className="overflow-hidden">
-              <p className="text-xs font-medium text-white leading-tight">管理员</p>
-              <p className="text-[10px] text-slate-500 truncate font-mono">admin@sys.com</p>
+              <p className="text-xs font-medium text-white leading-tight">{currentUser.displayName}</p>
+              <p className="text-[10px] text-slate-500 truncate">{currentUser.roleLabel}</p>
             </div>
           )}
         </div>
@@ -349,6 +428,14 @@ export default function App() {
 
           <div className="flex items-center space-x-4 text-xs">
             <span className="text-slate-500 font-mono hidden sm:inline">最后更新: {lastUpdated || '--:--:--'}</span>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>退出</span>
+            </button>
           </div>
         </header>
 
@@ -370,14 +457,66 @@ export default function App() {
               onAddLedger={handleAddLedger}
             />
           )}
-          {currentScreen === 'orders' && <OrdersScreen orders={orders} onAddOrder={handleAddOrder} />}
-          {currentScreen === 'purchases' && <PurchasesScreen purchases={purchases} />}
-          {currentScreen === 'sales' && <SalesScreen sales={sales} />}
+          {currentScreen === 'orders' && <OrdersScreen orders={orders} onAddOrder={handleAddOrder} canEnterOrders={canEnterOrders} />}
+          {currentScreen === 'purchases' && <PurchasesScreen purchases={purchases} canEnterPurchases={canEnterPurchases} />}
+          {currentScreen === 'sales' && <SalesScreen sales={sales} canEnterSales={canEnterSales} />}
           {currentScreen === 'system' && (
-            <SystemScreen logs={logs} backups={backups} onAddBackup={handleAddBackup} onRefresh={handleRefreshAll} />
+            <SystemScreen
+              logs={logs}
+              backups={backups}
+              users={users}
+              canManageUsers={canManageSystem}
+              onAddBackup={handleAddBackup}
+              onRefresh={handleRefreshAll}
+              onCreateUser={handleCreateUser}
+            />
           )}
         </main>
       </div>
+    </div>
+  );
+}
+
+function LoginScreen({ error, onLogin }: { error: string; onLogin: (username: string, password: string) => Promise<void> }) {
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('admin123');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    try {
+      await onLogin(username, password);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden">
+        <div className="px-6 py-5 border-b border-slate-200">
+          <div className="h-10 w-10 rounded bg-white border border-slate-200 flex items-center justify-center overflow-hidden mb-3">
+            <img src={ztfsIconLogo} alt="中通服图标LOGO" className="h-full w-full object-contain" />
+          </div>
+          <h1 className="text-lg font-bold text-slate-900">ERP 台账系统登录</h1>
+          <p className="text-xs text-slate-500 mt-1">使用后端数据库账号登录</p>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && <div className="px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-xs text-rose-600">{error}</div>}
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-semibold text-slate-600">账号</span>
+            <input value={username} onChange={(event) => setUsername(event.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500" />
+          </label>
+          <label className="space-y-1.5 block">
+            <span className="text-xs font-semibold text-slate-600">密码</span>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500" />
+          </label>
+          <button type="submit" disabled={submitting} className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+            {submitting ? '登录中...' : '登录'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

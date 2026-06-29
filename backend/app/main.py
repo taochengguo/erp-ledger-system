@@ -6,9 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
+from .auth import ensure_default_admin
 from .db import db, initialize_schema, table_count
 from .importer import import_excel
-from .routers import dashboard, ledgers, orders, purchases, sales, system
+from .routers import auth, dashboard, ledgers, orders, purchases, sales, system
 
 startup_state = {"database": "not_checked", "imported_rows": 0, "error": None}
 
@@ -17,6 +18,7 @@ startup_state = {"database": "not_checked", "imported_rows": 0, "error": None}
 async def lifespan(app: FastAPI):
     try:
         initialize_schema()
+        ensure_default_admin()
         if table_count("order_line") == 0:
             with db() as conn:
                 result = import_excel(conn, reset=True)
@@ -42,6 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(dashboard.router)
+app.include_router(auth.router)
 app.include_router(ledgers.router)
 app.include_router(orders.router)
 app.include_router(purchases.router)
@@ -57,4 +60,3 @@ def health() -> dict:
         "importedRows": startup_state["imported_rows"],
         "error": startup_state["error"],
     }
-

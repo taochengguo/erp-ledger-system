@@ -17,6 +17,7 @@ import { buildSalesInvoiceDraft, getNextReceiptPhase } from '../lib/salesDetailM
 
 interface SalesScreenProps {
   sales: SalesRecord[];
+  canEnterSales: boolean;
 }
 
 type EntryMode = 'contract' | 'invoice' | 'receipt';
@@ -49,7 +50,7 @@ function formatRatio(value?: number | null) {
   return `${moneyFormatter.format(percent)}%`;
 }
 
-export default function SalesScreen({ sales }: SalesScreenProps) {
+export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) {
   const [projectId, setProjectId] = useState('');
   const [orderId, setOrderId] = useState('');
   const [manager, setManager] = useState('');
@@ -402,11 +403,11 @@ export default function SalesScreen({ sales }: SalesScreenProps) {
                     ))}
                   </DataBlock>
 
-                  <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-100">
+                  {canEnterSales && <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-100">
                     <EntryButton icon={<FileText className="w-4 h-4" />} label="录入销售合同" onClick={() => openEntry('contract')} />
                     <EntryButton icon={<ReceiptText className="w-4 h-4" />} label="录入开票情况" onClick={() => openEntry('invoice')} />
                     <EntryButton icon={<Banknote className="w-4 h-4" />} label="录入回款情况" onClick={() => openEntry('receipt')} />
-                  </div>
+                  </div>}
                 </>
               )}
             </div>

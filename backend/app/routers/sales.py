@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from ..auth import CurrentUser, require_permission
 from ..db import db
 from ..serializers import clean_row, clean_rows
 
@@ -236,7 +237,11 @@ def get_sales_detail(order_line_id: int) -> dict:
 
 
 @router.post("/{order_line_id}/contracts")
-def add_sales_contract(order_line_id: int, payload: SalesContractCreate) -> dict:
+def add_sales_contract(
+    order_line_id: int,
+    payload: SalesContractCreate,
+    _: CurrentUser = Depends(require_permission("sales_entry")),
+) -> dict:
     _ensure_order_line(order_line_id)
     with db() as conn:
         conn.execute(
@@ -258,7 +263,11 @@ def add_sales_contract(order_line_id: int, payload: SalesContractCreate) -> dict
 
 
 @router.post("/{order_line_id}/invoices")
-def add_sales_invoice(order_line_id: int, payload: SalesInvoiceCreate) -> dict:
+def add_sales_invoice(
+    order_line_id: int,
+    payload: SalesInvoiceCreate,
+    _: CurrentUser = Depends(require_permission("sales_entry")),
+) -> dict:
     _ensure_order_line(order_line_id)
     with db() as conn:
         phase_no = _next_phase(conn, "sales_invoice", order_line_id)
@@ -281,7 +290,11 @@ def add_sales_invoice(order_line_id: int, payload: SalesInvoiceCreate) -> dict:
 
 
 @router.post("/{order_line_id}/receipts")
-def add_sales_receipt(order_line_id: int, payload: SalesReceiptCreate) -> dict:
+def add_sales_receipt(
+    order_line_id: int,
+    payload: SalesReceiptCreate,
+    _: CurrentUser = Depends(require_permission("sales_entry")),
+) -> dict:
     _ensure_order_line(order_line_id)
     with db() as conn:
         phase_no = _next_phase(conn, "sales_receipt", order_line_id)
