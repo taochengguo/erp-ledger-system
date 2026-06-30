@@ -18,6 +18,7 @@ from .config import settings
 from .db import db
 
 Permission = str
+ALL_PERMISSIONS = {"order_entry", "purchase_entry", "sales_entry", "system_admin"}
 
 ROLE_PERMISSIONS: dict[str, set[Permission]] = {
     "admin": {"order_entry", "purchase_entry", "sales_entry", "system_admin"},
@@ -45,10 +46,72 @@ class CurrentUser:
     display_name: str
     role_code: str
     permissions: list[str]
+    department_scope: list[str]
+    department_can_view: bool
+    department_can_entry: bool
 
 
-def has_permission(role_code: str, permission: Permission) -> bool:
-    return permission in ROLE_PERMISSIONS.get(role_code, set())
+def has_permission(role_code: str, permission: Permission, permissions: list[str] | set[str] | None = None) -> bool:
+    granted = set(permissions) if permissions is not None else ROLE_PERMISSIONS.get(role_code, set())
+    return permission in granted
+
+
+def normalize_permissions(role_code: str, permissions: list[str] | None) -> list[str]:
+    if permissions is None:
+        return sorted(ROLE_PERMISSIONS.get(role_code, set()))
+    return sorted({permission for permission in permissions if permission in ALL_PERMISSIONS})
+
+
+def parse_json_list(value: object) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item).strip()]
+
+
+def encode_json_list(values: list[str]) -> str:
+    clean_values = [value.strip() for value in values if value.strip()]
+    return json.dumps(clean_values, ensure_ascii=False)
+
+
+def apply_department_scope(
+    conditions: list[str],
+    params: dict[str, object],
+    user: CurrentUser,
+    column_name: str = "department",
+) -> None:
+    if has_permission(user.role_code, "system_admin", user.permissions):
+        return
+    if not user.department_scope:
+        return
+    if not user.department_can_view:
+        conditions.append("1=0")
+        return
+    placeholders: list[str] = []
+    for index, department in enumerate(user.department_scope):
+        key = f"scope_department_{index}"
+        placeholders.append(f":{key}")
+        params[key] = department
+    conditions.append(f"{column_name} IN ({', '.join(placeholders)})")
+
+
+def can_access_department(user: CurrentUser, department: str | None, require_entry: bool = False) -> bool:
+    if has_permission(user.role_code, "system_admin", user.permissions):
+        return True
+    if not user.department_scope:
+        return True
+    if require_entry and not user.department_can_entry:
+        return False
+    if not require_entry and not user.department_can_view:
+        return False
+    return bool(department and department in user.department_scope)
 
 
 def hash_password(password: str) -> str:
@@ -98,14 +161,37 @@ def decode_access_token(token: str) -> dict:
 
 def ensure_default_admin() -> None:
     with db() as conn:
+        _ensure_user_permission_columns(conn)
         exists = conn.execute(text("SELECT 1 FROM erp_user WHERE username = 'admin'")).scalar()
         if exists:
+            conn.execute(
+                text(
+                    """
+                    UPDATE erp_user
+                    SET role_code = 'admin',
+                        permissions_json = :permissions_json,
+                        department_scope_json = :department_scope_json,
+                        department_can_view = 1,
+                        department_can_entry = 1,
+                        is_active = 1
+                    WHERE username = 'admin'
+                    """
+                ),
+                {
+                    "permissions_json": encode_json_list(sorted(ALL_PERMISSIONS)),
+                    "department_scope_json": encode_json_list([]),
+                },
+            )
             return
         conn.execute(
             text(
                 """
-                INSERT INTO erp_user (username, password_hash, display_name, role_code, is_active)
-                VALUES (:username, :password_hash, :display_name, :role_code, 1)
+                INSERT INTO erp_user
+                  (username, password_hash, display_name, role_code, permissions_json,
+                   department_scope_json, department_can_view, department_can_entry, is_active)
+                VALUES
+                  (:username, :password_hash, :display_name, :role_code, :permissions_json,
+                   :department_scope_json, 1, 1, 1)
                 """
             ),
             {
@@ -113,6 +199,8 @@ def ensure_default_admin() -> None:
                 "password_hash": hash_password(os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")),
                 "display_name": "系统管理员",
                 "role_code": "admin",
+                "permissions_json": encode_json_list(sorted(ALL_PERMISSIONS)),
+                "department_scope_json": encode_json_list([]),
             },
         )
 
@@ -128,7 +216,8 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         row = conn.execute(
             text(
                 """
-                SELECT id, username, display_name, role_code
+                SELECT id, username, display_name, role_code, permissions_json,
+                       department_scope_json, department_can_view, department_can_entry
                 FROM erp_user
                 WHERE username = :username AND is_active = 1
                 """
@@ -138,18 +227,22 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     if row is None:
         raise HTTPException(status_code=401, detail="User disabled or not found")
     role_code = str(row["role_code"])
+    permissions = normalize_permissions(role_code, parse_json_list(row["permissions_json"]) if row["permissions_json"] else None)
     return CurrentUser(
         id=int(row["id"]),
         username=str(row["username"]),
         display_name=str(row["display_name"]),
         role_code=role_code,
-        permissions=sorted(ROLE_PERMISSIONS.get(role_code, set())),
+        permissions=permissions,
+        department_scope=parse_json_list(row["department_scope_json"]),
+        department_can_view=bool(row["department_can_view"]),
+        department_can_entry=bool(row["department_can_entry"]),
     )
 
 
 def require_permission(permission: Permission) -> Callable[[CurrentUser], CurrentUser]:
     def dependency(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        if not has_permission(user.role_code, permission):
+        if not has_permission(user.role_code, permission, user.permissions):
             raise HTTPException(status_code=403, detail="Permission denied")
         return user
 
@@ -164,7 +257,34 @@ def current_user_payload(user: CurrentUser) -> dict:
         "role_code": user.role_code,
         "role_label": ROLE_LABELS.get(user.role_code, user.role_code),
         "permissions": user.permissions,
+        "department_scope": user.department_scope,
+        "department_can_view": user.department_can_view,
+        "department_can_entry": user.department_can_entry,
     }
+
+
+def _ensure_user_permission_columns(conn) -> None:
+    columns = {
+        row["COLUMN_NAME"]
+        for row in conn.execute(
+            text(
+                """
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'erp_user'
+                """
+            )
+        ).mappings()
+    }
+    column_sql = {
+        "permissions_json": "ALTER TABLE erp_user ADD COLUMN permissions_json JSON NULL AFTER role_code",
+        "department_scope_json": "ALTER TABLE erp_user ADD COLUMN department_scope_json JSON NULL AFTER permissions_json",
+        "department_can_view": "ALTER TABLE erp_user ADD COLUMN department_can_view TINYINT(1) NOT NULL DEFAULT 0 AFTER department_scope_json",
+        "department_can_entry": "ALTER TABLE erp_user ADD COLUMN department_can_entry TINYINT(1) NOT NULL DEFAULT 0 AFTER department_can_view",
+    }
+    for column, ddl in column_sql.items():
+        if column not in columns:
+            conn.execute(text(ddl))
 
 
 def _sign(value: bytes) -> str:

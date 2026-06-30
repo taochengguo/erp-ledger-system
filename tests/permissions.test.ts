@@ -6,6 +6,7 @@ assert.deepEqual(getRolePermissions('admin'), ['order_entry', 'purchase_entry', 
 
 assert.equal(hasPermission({ roleCode: 'order_entry', permissions: ['order_entry'] }, 'order_entry'), true);
 assert.equal(hasPermission({ roleCode: 'order_entry', permissions: ['order_entry'] }, 'purchase_entry'), false);
+assert.equal(hasPermission({ roleCode: 'order_entry', permissions: [] }, 'order_entry'), false);
 
 assert.equal(hasPermission({ roleCode: 'purchase_entry', permissions: ['purchase_entry'] }, 'purchase_entry'), true);
 assert.equal(hasPermission({ roleCode: 'purchase_entry', permissions: ['purchase_entry'] }, 'sales_entry'), false);

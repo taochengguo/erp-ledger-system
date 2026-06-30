@@ -9,11 +9,21 @@ import {
   X,
   AlertTriangle,
   FileSpreadsheet,
-  TrendingUp,
   CheckCircle,
   Clock
 } from 'lucide-react';
 import { OrderRecord, ProjectLedger, PurchaseRecord, SalesRecord } from '../types';
+import {
+  buildLedgerContractRows,
+  buildLedgerPaymentRows,
+  getLedgerFinanceSummary,
+  normalizeLedgerStatusLabel,
+} from '../lib/salesDetailModel';
+import {
+  applyLedgerFilters,
+  emptyLedgerFilters,
+  submitQueryFilters,
+} from '../lib/queryFilterModel';
 
 interface LedgerScreenProps {
   ledgers: ProjectLedger[];
@@ -53,6 +63,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
   const [orderStatus, setOrderStatus] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [submittedFilters, setSubmittedFilters] = useState(emptyLedgerFilters);
   const [selectedLedger, setSelectedLedger] = useState<ProjectLedger | null>(null);
 
   // Pagination States
@@ -91,23 +102,30 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
     setOrderStatus('');
     setStartDate('');
     setEndDate('');
+    setSubmittedFilters(emptyLedgerFilters);
+    setCurrentPage(1);
+  };
+
+  const handleSearch = () => {
+    setSubmittedFilters(
+      submitQueryFilters({
+        projectId,
+        department,
+        manager,
+        clientUnit,
+        orderId,
+        orderStatus,
+        startDate,
+        endDate,
+      }),
+    );
     setCurrentPage(1);
   };
 
   // Filtered Ledgers
   const filteredLedgers = useMemo(() => {
-    return ledgers.filter(item => {
-      if (projectId && !item.id.toLowerCase().includes(projectId.toLowerCase())) return false;
-      if (department && item.department !== department) return false;
-      if (manager && !item.manager.toLowerCase().includes(manager.toLowerCase())) return false;
-      if (clientUnit && !item.clientUnit.toLowerCase().includes(clientUnit.toLowerCase())) return false;
-      if (orderId && !item.orderId.toLowerCase().includes(orderId.toLowerCase())) return false;
-      if (orderStatus && normalizeOrderStatus(item.orderStatus) !== orderStatus) return false;
-      if (startDate && item.orderDate < startDate) return false;
-      if (endDate && item.orderDate > endDate) return false;
-      return true;
-    });
-  }, [ledgers, projectId, department, manager, clientUnit, orderId, orderStatus, startDate, endDate]);
+    return applyLedgerFilters(ledgers, submittedFilters);
+  }, [ledgers, submittedFilters]);
 
   // Paginated Ledgers
   const paginatedLedgers = useMemo(() => {
@@ -129,8 +147,18 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
     () => (selectedLedger ? sales.filter((item) => item.projectId === selectedLedger.id) : []),
     [sales, selectedLedger],
   );
-  const selectedPurchasePaid = selectedPurchases.reduce((total, item) => total + item.paymentAmount, 0);
-  const selectedSalesInvoice = selectedSales.reduce((total, item) => total + item.invoiceAmount, 0);
+  const selectedFinanceSummary = useMemo(
+    () => (selectedLedger ? getLedgerFinanceSummary(selectedLedger, selectedPurchases, selectedSales) : null),
+    [selectedLedger, selectedPurchases, selectedSales],
+  );
+  const selectedContractRows = useMemo(
+    () => buildLedgerContractRows(selectedOrders, selectedPurchases, selectedSales),
+    [selectedOrders, selectedPurchases, selectedSales],
+  );
+  const selectedPaymentRows = useMemo(
+    () => buildLedgerPaymentRows(selectedOrders, selectedPurchases, selectedSales),
+    [selectedOrders, selectedPurchases, selectedSales],
+  );
 
   // Totals & KPI Metrics based on FILTERED or ALL ledgers? Let's use ALL ledgers for global stats, but dynamically updated!
   const stats = useMemo(() => {
@@ -238,7 +266,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
               type="text" 
               placeholder="输入项目编号"
               value={projectId}
-              onChange={e => { setProjectId(e.target.value); setCurrentPage(1); }}
+              onChange={e => setProjectId(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -248,7 +276,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
             <label className="text-xs font-medium text-slate-500">部门</label>
             <select 
               value={department}
-              onChange={e => { setDepartment(e.target.value); setCurrentPage(1); }}
+              onChange={e => setDepartment(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-white text-xs text-slate-700"
             >
               <option value="">全部部门</option>
@@ -267,7 +295,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
               type="text" 
               placeholder="输入经理姓名"
               value={manager}
-              onChange={e => { setManager(e.target.value); setCurrentPage(1); }}
+              onChange={e => setManager(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -279,7 +307,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
               type="text" 
               placeholder="输入客户单位名称"
               value={clientUnit}
-              onChange={e => { setClientUnit(e.target.value); setCurrentPage(1); }}
+              onChange={e => setClientUnit(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -291,7 +319,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
               type="text" 
               placeholder="输入订单号"
               value={orderId}
-              onChange={e => { setOrderId(e.target.value); setCurrentPage(1); }}
+              onChange={e => setOrderId(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -301,7 +329,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
             <label className="text-xs font-medium text-slate-500">订单状态</label>
             <select 
               value={orderStatus}
-              onChange={e => { setOrderStatus(e.target.value); setCurrentPage(1); }}
+              onChange={e => setOrderStatus(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-white text-xs text-slate-700"
             >
               {statusOptions.map((option) => (
@@ -319,14 +347,14 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
               <input 
                 type="date" 
                 value={startDate}
-                onChange={e => { setStartDate(e.target.value); setCurrentPage(1); }}
+                onChange={e => setStartDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
               />
               <span className="text-slate-400 text-xs">至</span>
               <input 
                 type="date" 
                 value={endDate}
-                onChange={e => { setEndDate(e.target.value); setCurrentPage(1); }}
+                onChange={e => setEndDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
               />
             </div>
@@ -342,6 +370,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
             <span>重置</span>
           </button>
           <button 
+            onClick={handleSearch}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold"
           >
             <Search className="w-3.5 h-3.5" />
@@ -545,7 +574,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
                     ['客户单位', selectedLedger.clientUnit],
                     ['负责部门', selectedLedger.department],
                     ['客户经理', selectedLedger.manager],
-                    ['订单状态', selectedLedger.orderStatus],
+                    ['订单状态', normalizeLedgerStatusLabel(selectedLedger.orderStatus)],
                     ['订单数量', selectedLedger.orderId],
                     ['最近订单日期', selectedLedger.orderDate || '-'],
                     ['订单金额', `¥${formatMoney(selectedLedger.orderAmount)}`],
@@ -559,6 +588,23 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
                     </div>
                   ))}
                 </div>
+                {selectedFinanceSummary && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+                    {[
+                      ['应付账款', selectedFinanceSummary.accountsPayable, 'text-slate-900'],
+                      ['已付账款', selectedFinanceSummary.paidAmount, 'text-slate-900'],
+                      ['应收账款', selectedFinanceSummary.accountsReceivable, 'text-rose-600'],
+                      ['已收账款', selectedFinanceSummary.receivedAmount, 'text-emerald-600'],
+                    ].map(([label, value, color]) => (
+                      <div key={label as string} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <p className="text-[11px] font-medium text-slate-400">{label as string}</p>
+                        <p className={`mt-1 text-xs font-bold font-mono ${color as string}`}>
+                          ¥{formatMoney(value as number)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
 
               <section>
@@ -599,97 +645,87 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
                 </div>
               </section>
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-                <section>
-                  <h3 className="text-sm font-bold text-slate-900 mb-3">采购信息</h3>
-                  <div className="overflow-x-auto rounded-lg border border-slate-200">
-                    <table className="w-full min-w-[620px] text-left">
-                      <thead className="bg-slate-50 text-xs text-slate-500">
+              <section>
+                <h3 className="text-sm font-bold text-slate-900 mb-3">采购销售信息</h3>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full min-w-[1120px] text-left">
+                    <thead className="bg-slate-50 text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2 font-semibold">订单号</th>
+                        <th className="px-4 py-2 font-semibold">货物名称</th>
+                        <th className="px-4 py-2 font-semibold">采购合同号</th>
+                        <th className="px-4 py-2 font-semibold">供应商</th>
+                        <th className="px-4 py-2 font-semibold text-right">合同金额</th>
+                        <th className="px-4 py-2 font-semibold">销售合同号</th>
+                        <th className="px-4 py-2 font-semibold">签订日期</th>
+                        <th className="px-4 py-2 font-semibold text-right">合同价值</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedContractRows.length === 0 ? (
                         <tr>
-                          <th className="px-4 py-2 font-semibold">采购合同号</th>
-                          <th className="px-4 py-2 font-semibold">供应商</th>
-                          <th className="px-4 py-2 font-semibold text-right">合同金额</th>
-                          <th className="px-4 py-2 font-semibold text-right">收票金额</th>
-                          <th className="px-4 py-2 font-semibold text-right">付款金额</th>
+                          <td colSpan={8} className="px-4 py-6 text-center text-xs text-slate-400">暂无采购销售记录</td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {selectedPurchases.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="px-4 py-6 text-center text-xs text-slate-400">暂无采购记录</td>
+                      ) : (
+                        selectedContractRows.map((item) => (
+                          <tr key={`${item.orderId}-${item.purchaseContractNo}-${item.salesContractNo}`} className="text-xs text-slate-700">
+                            <td className="px-4 py-2 font-mono text-blue-600">{item.orderId}</td>
+                            <td className="px-4 py-2 max-w-[240px] truncate" title={item.goodsName}>{item.goodsName}</td>
+                            <td className="px-4 py-2 font-mono text-blue-600">{item.purchaseContractNo}</td>
+                            <td className="px-4 py-2 max-w-[180px] truncate" title={item.supplier}>{item.supplier}</td>
+                            <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.purchaseContractAmount)}</td>
+                            <td className="px-4 py-2 font-mono text-blue-600">{item.salesContractNo}</td>
+                            <td className="px-4 py-2">{item.salesContractDate}</td>
+                            <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.salesContractValue)}</td>
                           </tr>
-                        ) : (
-                          selectedPurchases.map((item) => (
-                            <tr key={`${item.projectId}-${item.contractNo}`} className="text-xs text-slate-700">
-                              <td className="px-4 py-2 font-mono text-blue-600">{item.contractNo}</td>
-                              <td className="px-4 py-2 max-w-[180px] truncate" title={item.supplier}>{item.supplier}</td>
-                              <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.contractAmount)}</td>
-                              <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.invoiceAmount)}</td>
-                              <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.paymentAmount)}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-
-                <section>
-                  <h3 className="text-sm font-bold text-slate-900 mb-3">销售信息</h3>
-                  <div className="overflow-x-auto rounded-lg border border-slate-200">
-                    <table className="w-full min-w-[560px] text-left">
-                      <thead className="bg-slate-50 text-xs text-slate-500">
-                        <tr>
-                          <th className="px-4 py-2 font-semibold">销售合同号</th>
-                          <th className="px-4 py-2 font-semibold">签订日期</th>
-                          <th className="px-4 py-2 font-semibold text-right">合同价值</th>
-                          <th className="px-4 py-2 font-semibold text-right">开票金额</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {selectedSales.length === 0 ? (
-                          <tr>
-                            <td colSpan={4} className="px-4 py-6 text-center text-xs text-slate-400">暂无销售记录</td>
-                          </tr>
-                        ) : (
-                          selectedSales.map((item) => (
-                            <tr key={`${item.projectId}-${item.contractNo}`} className="text-xs text-slate-700">
-                              <td className="px-4 py-2 font-mono text-blue-600">{item.contractNo}</td>
-                              <td className="px-4 py-2">{item.contractDate || '-'}</td>
-                              <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.contractValue)}</td>
-                              <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.invoiceAmount)}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              </div>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
 
               <section>
-                <h3 className="text-sm font-bold text-slate-900 mb-3">付款回款信息</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="rounded-lg border border-slate-200 px-4 py-3">
-                    <p className="text-xs text-slate-400">采购应付</p>
-                    <p className="mt-1 text-base font-bold text-slate-900">¥{formatMoney(selectedLedger.purchaseAmount)}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 px-4 py-3">
-                    <p className="text-xs text-slate-400">已付款</p>
-                    <p className="mt-1 text-base font-bold text-slate-900">¥{formatMoney(selectedPurchasePaid)}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 px-4 py-3">
-                    <p className="text-xs text-slate-400">已回款</p>
-                    <p className="mt-1 text-base font-bold text-emerald-600">¥{formatMoney(selectedLedger.totalReceived)}</p>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 px-4 py-3">
-                    <p className="text-xs text-slate-400">应收款</p>
-                    <p className="mt-1 text-base font-bold text-rose-600">¥{formatMoney(selectedLedger.orderAmount - selectedLedger.totalReceived)}</p>
-                  </div>
-                </div>
-                <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-                  <TrendingUp className="w-4 h-4 text-blue-500" />
-                  <span>销售开票合计 ¥{formatMoney(selectedSalesInvoice)}，订单金额与采购金额以项目汇总口径展示。</span>
+                <h3 className="text-sm font-bold text-slate-900 mb-3">收款付款信息</h3>
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full min-w-[1280px] text-left">
+                    <thead className="bg-slate-50 text-xs text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2 font-semibold">订单号</th>
+                        <th className="px-4 py-2 font-semibold">货物名称</th>
+                        <th className="px-4 py-2 font-semibold text-right">采购付款金额</th>
+                        <th className="px-4 py-2 font-semibold text-right">应付账款</th>
+                        <th className="px-4 py-2 font-semibold">销售回款日</th>
+                        <th className="px-4 py-2 font-semibold text-right">回款金额</th>
+                        <th className="px-4 py-2 font-semibold text-right">回款占比</th>
+                        <th className="px-4 py-2 font-semibold text-right">应收账款</th>
+                        <th className="px-4 py-2 font-semibold text-right">毛利润</th>
+                        <th className="px-4 py-2 font-semibold text-right">毛利率</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedPaymentRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={10} className="px-4 py-6 text-center text-xs text-slate-400">暂无收款付款记录</td>
+                        </tr>
+                      ) : (
+                        selectedPaymentRows.map((item) => (
+                          <tr key={`${item.orderId}-${item.goodsName}`} className="text-xs text-slate-700">
+                            <td className="px-4 py-2 font-mono text-blue-600">{item.orderId}</td>
+                            <td className="px-4 py-2 max-w-[240px] truncate" title={item.goodsName}>{item.goodsName}</td>
+                            <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.purchasePaymentAmount)}</td>
+                            <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.accountsPayable)}</td>
+                            <td className="px-4 py-2">{item.salesReceiptDate}</td>
+                            <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.receiptAmount)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatMoney(item.receiptRatio)}%</td>
+                            <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.accountsReceivable)}</td>
+                            <td className="px-4 py-2 text-right font-mono">¥{formatMoney(item.grossProfit)}</td>
+                            <td className="px-4 py-2 text-right font-mono">{formatMoney(item.grossProfitRate)}%</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </section>
             </div>

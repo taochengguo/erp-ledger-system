@@ -9,6 +9,9 @@ export interface AuthUser {
   roleCode: RoleCode | string;
   roleLabel: string;
   permissions: Permission[];
+  departmentScope: string[];
+  departmentCanView: boolean;
+  departmentCanEntry: boolean;
 }
 
 export const ROLE_PERMISSIONS: Record<RoleCode, Permission[]> = {
@@ -33,7 +36,7 @@ export function getRolePermissions(roleCode: string): Permission[] {
 
 export function hasPermission(user: Pick<AuthUser, 'roleCode' | 'permissions'> | null, permission: Permission) {
   if (!user) return false;
-  return user.permissions.includes(permission) || getRolePermissions(user.roleCode).includes(permission);
+  return user.permissions.includes(permission);
 }
 
 export function normalizeUser(raw: {
@@ -43,6 +46,9 @@ export function normalizeUser(raw: {
   role_code: string;
   role_label?: string;
   permissions?: string[];
+  department_scope?: string[];
+  department_can_view?: boolean;
+  department_can_entry?: boolean;
 }): AuthUser {
   const roleCode = raw.role_code as RoleCode;
   return {
@@ -52,5 +58,8 @@ export function normalizeUser(raw: {
     roleCode,
     roleLabel: raw.role_label || ROLE_LABELS[roleCode] || raw.role_code,
     permissions: (raw.permissions || getRolePermissions(raw.role_code)) as Permission[],
+    departmentScope: raw.department_scope || [],
+    departmentCanView: Boolean(raw.department_can_view),
+    departmentCanEntry: Boolean(raw.department_can_entry),
   };
 }

@@ -8,10 +8,13 @@ from ..auth import (
     ROLE_LABELS,
     ROLE_PERMISSIONS,
     CurrentUser,
+    encode_json_list,
     create_access_token,
     current_user_payload,
     get_current_user,
     hash_password,
+    normalize_permissions,
+    parse_json_list,
     require_permission,
     verify_password,
 )
@@ -31,6 +34,10 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     role_code: str
+    permissions: list[str] = Field(default_factory=list)
+    department_scope: list[str] = Field(default_factory=list)
+    department_can_view: bool = False
+    department_can_entry: bool = False
 
 
 @router.post("/login")
@@ -39,7 +46,8 @@ def login(payload: LoginRequest) -> dict:
         row = conn.execute(
             text(
                 """
-                SELECT id, username, password_hash, display_name, role_code, is_active
+                SELECT id, username, password_hash, display_name, role_code, permissions_json,
+                       department_scope_json, department_can_view, department_can_entry, is_active
                 FROM erp_user
                 WHERE username = :username
                 """
@@ -53,7 +61,13 @@ def login(payload: LoginRequest) -> dict:
             username=str(row["username"]),
             display_name=str(row["display_name"]),
             role_code=str(row["role_code"]),
-            permissions=sorted(ROLE_PERMISSIONS.get(str(row["role_code"]), set())),
+            permissions=normalize_permissions(
+                str(row["role_code"]),
+                parse_json_list(row["permissions_json"]) if row["permissions_json"] else None,
+            ),
+            department_scope=parse_json_list(row["department_scope_json"]),
+            department_can_view=bool(row["department_can_view"]),
+            department_can_entry=bool(row["department_can_entry"]),
         )
         conn.execute(text("UPDATE erp_user SET last_login_at = NOW() WHERE id = :id"), {"id": user.id})
     return {"access_token": create_access_token(user), "token_type": "bearer", "user": current_user_payload(user)}
@@ -84,8 +98,11 @@ def list_users(_: CurrentUser = Depends(require_permission("system_admin"))) -> 
         rows = conn.execute(
             text(
                 """
-                SELECT id, username, display_name, role_code, is_active, last_login_at, created_at
+                SELECT id, username, display_name, role_code, permissions_json,
+                       department_scope_json, department_can_view, department_can_entry,
+                       is_active, last_login_at, created_at
                 FROM erp_user
+                WHERE is_active = 1
                 ORDER BY id
                 """
             )
@@ -97,6 +114,10 @@ def list_users(_: CurrentUser = Depends(require_permission("system_admin"))) -> 
 def create_user(payload: UserCreate, admin: CurrentUser = Depends(require_permission("system_admin"))) -> dict:
     if payload.role_code not in ROLE_PERMISSIONS:
         raise HTTPException(status_code=400, detail="无效的角色")
+    permissions = normalize_permissions(payload.role_code, payload.permissions)
+    department_scope = [department.strip() for department in payload.department_scope if department.strip()]
+    if department_scope and not (payload.department_can_view or payload.department_can_entry):
+        raise HTTPException(status_code=400, detail="选择部门后至少需要勾选查看或录入权限")
     with db() as conn:
         exists = conn.execute(
             text("SELECT 1 FROM erp_user WHERE username = :username"),
@@ -107,8 +128,12 @@ def create_user(payload: UserCreate, admin: CurrentUser = Depends(require_permis
         conn.execute(
             text(
                 """
-                INSERT INTO erp_user (username, password_hash, display_name, role_code, is_active)
-                VALUES (:username, :password_hash, :display_name, :role_code, 1)
+                INSERT INTO erp_user
+                  (username, password_hash, display_name, role_code, permissions_json,
+                   department_scope_json, department_can_view, department_can_entry, is_active)
+                VALUES
+                  (:username, :password_hash, :display_name, :role_code, :permissions_json,
+                   :department_scope_json, :department_can_view, :department_can_entry, 1)
                 """
             ),
             {
@@ -116,6 +141,10 @@ def create_user(payload: UserCreate, admin: CurrentUser = Depends(require_permis
                 "password_hash": hash_password(payload.password),
                 "display_name": payload.display_name,
                 "role_code": payload.role_code,
+                "permissions_json": encode_json_list(permissions),
+                "department_scope_json": encode_json_list(department_scope),
+                "department_can_view": int(payload.department_can_view),
+                "department_can_entry": int(payload.department_can_entry),
             },
         )
         conn.execute(
@@ -125,6 +154,74 @@ def create_user(payload: UserCreate, admin: CurrentUser = Depends(require_permis
                 VALUES (:user_id, :user_name, '账号管理', 'create_user', :detail, 'success')
                 """
             ),
-            {"user_id": admin.id, "user_name": admin.display_name, "detail": f"创建账号 {payload.username}"},
+            {
+                "user_id": admin.id,
+                "user_name": admin.display_name,
+                "detail": f"创建账号 {payload.username}，权限 {','.join(permissions) or '无'}",
+            },
+        )
+    return list_users(admin)
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, admin: CurrentUser = Depends(require_permission("system_admin"))) -> dict:
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+    with db() as conn:
+        target = conn.execute(
+            text(
+                """
+                SELECT id, username, display_name, role_code, permissions_json, is_active
+                FROM erp_user
+                WHERE id = :user_id
+                """
+            ),
+            {"user_id": user_id},
+        ).mappings().first()
+        if target is None or not target["is_active"]:
+            raise HTTPException(status_code=404, detail="账号不存在")
+
+        target_permissions = normalize_permissions(
+            str(target["role_code"]),
+            parse_json_list(target["permissions_json"]) if target["permissions_json"] else None,
+        )
+        if "system_admin" in target_permissions:
+            admin_rows = conn.execute(
+                text(
+                    """
+                    SELECT role_code, permissions_json
+                    FROM erp_user
+                    WHERE is_active = 1
+                    """
+                )
+            ).mappings().all()
+            active_admin_count = sum(
+                1
+                for row in admin_rows
+                if "system_admin"
+                in normalize_permissions(
+                    str(row["role_code"]),
+                    parse_json_list(row["permissions_json"]) if row["permissions_json"] else None,
+                )
+            )
+            if active_admin_count <= 1:
+                raise HTTPException(status_code=400, detail="至少保留一个系统管理员账号")
+
+        conn.execute(
+            text("UPDATE erp_user SET is_active = 0, updated_at = NOW() WHERE id = :user_id"),
+            {"user_id": user_id},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO operation_log (user_id, user_name, module_name, action_name, detail, status)
+                VALUES (:user_id, :user_name, '账号管理', 'delete_user', :detail, 'success')
+                """
+            ),
+            {
+                "user_id": admin.id,
+                "user_name": admin.display_name,
+                "detail": f"删除账号 {target['username']}",
+            },
         )
     return list_users(admin)

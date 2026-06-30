@@ -10,11 +10,28 @@ import {
   FileArchive,
   Terminal,
   Activity,
-  UserPlus
+  UserPlus,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+  Plus,
+  X,
+  Trash2
 } from 'lucide-react';
 import { BackendUserRecord } from '../api';
-import { ROLE_LABELS, RoleCode } from '../lib/permissions';
+import { Permission, ROLE_LABELS, RoleCode } from '../lib/permissions';
 import { OperationLog, BackupInfo } from '../types';
+
+export interface CreateUserPayload {
+  username: string;
+  password: string;
+  display_name: string;
+  role_code: string;
+  permissions: Permission[];
+  department_scope: string[];
+  department_can_view: boolean;
+  department_can_entry: boolean;
+}
 
 interface SystemScreenProps {
   logs: OperationLog[];
@@ -23,10 +40,51 @@ interface SystemScreenProps {
   onRefresh: () => void;
   users: BackendUserRecord[];
   canManageUsers: boolean;
-  onCreateUser: (data: { username: string; password: string; display_name: string; role_code: string }) => Promise<void>;
+  departments: string[];
+  currentUserId: number;
+  onCreateUser: (data: CreateUserPayload) => Promise<void>;
+  onDeleteUser: (userId: number) => Promise<void>;
 }
 
-export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, users, canManageUsers, onCreateUser }: SystemScreenProps) {
+const PERMISSION_OPTIONS: Array<{ value: Permission; label: string }> = [
+  { value: 'order_entry', label: '订单详情录入' },
+  { value: 'purchase_entry', label: '采购详情录入' },
+  { value: 'sales_entry', label: '销售详情录入' },
+  { value: 'system_admin', label: '系统权限' },
+];
+const PERMISSION_LABELS = Object.fromEntries(PERMISSION_OPTIONS.map((item) => [item.value, item.label])) as Record<Permission, string>;
+
+function deriveRoleCode(permissions: Permission[]): RoleCode {
+  if (permissions.includes('system_admin')) return 'admin';
+  if (permissions.length === 1 && permissions[0] === 'order_entry') return 'order_entry';
+  if (permissions.length === 1 && permissions[0] === 'purchase_entry') return 'purchase_entry';
+  if (permissions.length === 1 && permissions[0] === 'sales_entry') return 'sales_entry';
+  return 'viewer';
+}
+
+function parseList(value: string[] | string | null | undefined) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+export default function SystemScreen({
+  logs,
+  backups,
+  onAddBackup,
+  onRefresh,
+  users,
+  canManageUsers,
+  departments,
+  currentUserId,
+  onCreateUser,
+  onDeleteUser,
+}: SystemScreenProps) {
   // Pagination State for Logs
   const [logPage, setLogPage] = useState(1);
   const itemsPerPage = 5;
@@ -36,10 +94,18 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, us
   const [userForm, setUserForm] = useState({
     username: '',
     password: '',
+    confirm_password: '',
     display_name: '',
     role_code: 'viewer',
+    permissions: [] as Permission[],
+    department_scope: [] as string[],
+    department_can_view: false,
+    department_can_entry: false,
   });
   const [userMessage, setUserMessage] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [departmentInput, setDepartmentInput] = useState('');
 
   // Filter logs & backups to show only 5 items per page
   const paginatedLogs = useMemo(() => {
@@ -54,6 +120,7 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, us
 
   const totalLogPages = Math.max(1, Math.ceil(logs.length / itemsPerPage));
   const totalBackupPages = Math.max(1, Math.ceil(backups.length / itemsPerPage));
+  const availableDepartments = useMemo(() => Array.from(new Set(departments.filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-CN')), [departments]);
 
   // Trigger Immediate Backup
   const handleImmediateBackup = () => {
@@ -86,12 +153,74 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, us
   const handleUserSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setUserMessage('');
+    if (userForm.password !== userForm.confirm_password) {
+      setUserMessage('两次输入的密码不一致');
+      return;
+    }
+    if (userForm.department_scope.length > 0 && !userForm.department_can_view && !userForm.department_can_entry) {
+      setUserMessage('选择部门后至少勾选查看或录入权限');
+      return;
+    }
     try {
-      await onCreateUser(userForm);
-      setUserForm({ username: '', password: '', display_name: '', role_code: 'viewer' });
+      const { confirm_password: _confirmPassword, ...payload } = userForm;
+      await onCreateUser({ ...payload, role_code: deriveRoleCode(payload.permissions) });
+      setUserForm({
+        username: '',
+        password: '',
+        confirm_password: '',
+        display_name: '',
+        role_code: 'viewer',
+        permissions: [],
+        department_scope: [],
+        department_can_view: false,
+        department_can_entry: false,
+      });
       setUserMessage('账号创建成功');
     } catch (error) {
       setUserMessage(error instanceof Error ? error.message : '账号创建失败');
+    }
+  };
+
+  const togglePermission = (permission: Permission) => {
+    setUserForm((prev) => ({
+      ...prev,
+      permissions: prev.permissions.includes(permission)
+        ? prev.permissions.filter((item) => item !== permission)
+        : [...prev.permissions, permission],
+    }));
+  };
+
+  const toggleDepartment = (department: string) => {
+    setUserForm((prev) => ({
+      ...prev,
+      department_scope: prev.department_scope.includes(department)
+        ? prev.department_scope.filter((item) => item !== department)
+        : [...prev.department_scope, department],
+    }));
+  };
+
+  const addDepartment = () => {
+    const department = departmentInput.trim();
+    if (!department || userForm.department_scope.includes(department)) {
+      setDepartmentInput('');
+      return;
+    }
+    setUserForm((prev) => ({
+      ...prev,
+      department_scope: [...prev.department_scope, department],
+    }));
+    setDepartmentInput('');
+  };
+
+  const handleDeleteUser = async (user: BackendUserRecord) => {
+    const confirmed = window.confirm(`确定删除账号 "${user.username}" 吗？删除后该账号将不能登录。`);
+    if (!confirmed) return;
+    setUserMessage('');
+    try {
+      await onDeleteUser(user.id);
+      setUserMessage('账号删除成功');
+    } catch (error) {
+      setUserMessage(error instanceof Error ? error.message : '账号删除失败');
     }
   };
 
@@ -127,7 +256,7 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, us
             {userMessage && <span className="text-xs font-medium text-blue-600">{userMessage}</span>}
           </div>
 
-          <div className="p-5 grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-5">
+          <div className="p-5 grid grid-cols-1 xl:grid-cols-[520px_1fr] gap-5">
             <form onSubmit={handleUserSubmit} className="rounded-lg border border-slate-200 p-4 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="space-y-1">
@@ -140,29 +269,101 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, us
                 </label>
                 <label className="space-y-1">
                   <span className="block text-xs font-semibold text-slate-600">初始密码</span>
-                  <input required type="password" minLength={6} value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                  <div className="relative">
+                    <input required type={showPassword ? 'text' : 'password'} minLength={6} value={userForm.password} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} className="w-full px-3 py-2 pr-9 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                    <button type="button" onClick={() => setShowPassword((value) => !value)} title={showPassword ? '隐藏密码' : '显示密码'} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700">
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </label>
                 <label className="space-y-1">
-                  <span className="block text-xs font-semibold text-slate-600">权限角色</span>
-                  <select value={userForm.role_code} onChange={(e) => setUserForm({ ...userForm, role_code: e.target.value })} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 bg-white">
-                    {(Object.keys(ROLE_LABELS) as RoleCode[]).map((roleCode) => (
-                      <option key={roleCode} value={roleCode}>{ROLE_LABELS[roleCode]}</option>
-                    ))}
-                  </select>
+                  <span className="block text-xs font-semibold text-slate-600">确认密码</span>
+                  <div className="relative">
+                    <input required type={showConfirmPassword ? 'text' : 'password'} minLength={6} value={userForm.confirm_password} onChange={(e) => setUserForm({ ...userForm, confirm_password: e.target.value })} className="w-full px-3 py-2 pr-9 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                    <button type="button" onClick={() => setShowConfirmPassword((value) => !value)} title={showConfirmPassword ? '隐藏密码' : '显示密码'} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700">
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </label>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                  <ShieldCheck className="w-4 h-4 text-blue-600" />
+                  <span>功能权限</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {PERMISSION_OPTIONS.map((item) => (
+                    <label key={item.value} className="flex items-center gap-2 px-2.5 py-2 rounded border border-slate-100 bg-slate-50 text-xs text-slate-700">
+                      <input type="checkbox" checked={userForm.permissions.includes(item.value)} onChange={() => togglePermission(item.value)} />
+                      <span>{item.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-slate-700">部门权限</span>
+                  <div className="flex items-center gap-3 text-xs text-slate-600">
+                    <label className="inline-flex items-center gap-1.5">
+                      <input type="checkbox" checked={userForm.department_can_view} onChange={(e) => setUserForm({ ...userForm, department_can_view: e.target.checked })} />
+                      <span>查看</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5">
+                      <input type="checkbox" checked={userForm.department_can_entry} onChange={(e) => setUserForm({ ...userForm, department_can_entry: e.target.checked })} />
+                      <span>录入</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    list="department-options"
+                    value={departmentInput}
+                    onChange={(event) => setDepartmentInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addDepartment();
+                      }
+                    }}
+                    placeholder="选择或输入部门"
+                    className="min-w-0 flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                  <datalist id="department-options">
+                    {availableDepartments.map((department) => (
+                      <option key={department} value={department} />
+                    ))}
+                  </datalist>
+                  <button type="button" onClick={addDepartment} title="添加部门" className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-slate-900 text-white hover:bg-slate-800">
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 min-h-8">
+                  {userForm.department_scope.map((department) => (
+                    <span key={department} className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded border border-blue-100 bg-blue-50 text-xs text-blue-700">
+                      <span className="truncate">{department}</span>
+                      <button type="button" onClick={() => toggleDepartment(department)} title={`移除 ${department}`} className="text-blue-500 hover:text-blue-800">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                  {userForm.department_scope.length === 0 && <span className="text-xs text-slate-400 py-1">未选择时默认全部部门</span>}
+                </div>
               </div>
               <button type="submit" className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">创建账号</button>
             </form>
 
             <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="w-full min-w-[720px] text-left">
+              <table className="w-full min-w-[920px] text-left">
                 <thead className="bg-slate-50 text-xs text-slate-500">
                   <tr>
                     <th className="px-4 py-2 font-semibold">账号</th>
                     <th className="px-4 py-2 font-semibold">姓名</th>
                     <th className="px-4 py-2 font-semibold">角色</th>
+                    <th className="px-4 py-2 font-semibold">功能权限</th>
+                    <th className="px-4 py-2 font-semibold">部门权限</th>
                     <th className="px-4 py-2 font-semibold">状态</th>
                     <th className="px-4 py-2 font-semibold">最后登录</th>
+                    <th className="px-4 py-2 font-semibold text-center">操作</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -171,8 +372,30 @@ export default function SystemScreen({ logs, backups, onAddBackup, onRefresh, us
                       <td className="px-4 py-2 font-mono text-blue-600">{user.username}</td>
                       <td className="px-4 py-2 font-semibold">{user.display_name}</td>
                       <td className="px-4 py-2">{ROLE_LABELS[user.role_code as RoleCode] || user.role_code}</td>
+                      <td className="px-4 py-2">
+                        {parseList(user.permissions_json).map((permission) => PERMISSION_LABELS[permission as Permission] || permission).join('、') || '无'}
+                      </td>
+                      <td className="px-4 py-2">
+                        {parseList(user.department_scope_json).join('、') || '全部部门'}
+                        <span className="ml-2 text-slate-400">
+                          {user.department_can_view ? '可看' : ''}
+                          {user.department_can_view && user.department_can_entry ? '/' : ''}
+                          {user.department_can_entry ? '可录' : ''}
+                        </span>
+                      </td>
                       <td className="px-4 py-2">{user.is_active ? '启用' : '停用'}</td>
                       <td className="px-4 py-2 font-mono text-slate-400">{user.last_login_at || '-'}</td>
+                      <td className="px-4 py-2 text-center">
+                        <button
+                          type="button"
+                          disabled={user.id === currentUserId || !user.is_active}
+                          onClick={() => handleDeleteUser(user)}
+                          title={user.id === currentUserId ? '不能删除当前登录账号' : '删除账号'}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,4 +1,4 @@
-from app.auth import ROLE_PERMISSIONS, has_permission
+from app.auth import CurrentUser, ROLE_PERMISSIONS, can_access_department, has_permission, normalize_permissions
 
 
 def test_admin_can_use_every_permission():
@@ -29,3 +29,26 @@ def test_viewer_has_no_write_permissions():
     assert ROLE_PERMISSIONS["viewer"] == set()
     assert not has_permission("viewer", "order_entry")
     assert not has_permission("unknown", "order_entry")
+
+
+def test_custom_permissions_override_role_defaults():
+    assert normalize_permissions("viewer", ["order_entry", "bad_permission"]) == ["order_entry"]
+    assert has_permission("viewer", "order_entry", ["order_entry"])
+    assert not has_permission("admin", "sales_entry", ["order_entry"])
+
+
+def test_department_scope_limits_view_and_entry():
+    user = CurrentUser(
+        id=1,
+        username="dept_user",
+        display_name="部门用户",
+        role_code="viewer",
+        permissions=[],
+        department_scope=["科贸部"],
+        department_can_view=True,
+        department_can_entry=False,
+    )
+
+    assert can_access_department(user, "科贸部")
+    assert not can_access_department(user, "物流部")
+    assert not can_access_department(user, "科贸部", require_entry=True)

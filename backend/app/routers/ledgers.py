@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
+from ..auth import CurrentUser, apply_department_scope, get_current_user
 from ..db import db
 from ..serializers import clean_rows
 
@@ -21,6 +22,7 @@ def list_ledgers(
     end_date: str | None = None,
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     conditions = ["1=1"]
     params: dict[str, object] = {"limit": limit, "offset": offset}
@@ -48,6 +50,7 @@ def list_ledgers(
     if end_date:
         conditions.append("first_order_date <= :end_date")
         params["end_date"] = end_date
+    apply_department_scope(conditions, params, user)
 
     where_sql = " AND ".join(conditions)
     with db() as conn:
@@ -65,4 +68,3 @@ def list_ledgers(
             params,
         ).mappings().all()
     return {"total": int(total or 0), "items": clean_rows(rows)}
-

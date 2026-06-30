@@ -12,3 +12,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 业务台账管理系统/
+.codex/

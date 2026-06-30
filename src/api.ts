@@ -1,9 +1,20 @@
 const API_BASE = ((import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_API_BASE_URL) || '/api';
+export const UNAUTHORIZED_EVENT = 'erp:unauthorized';
 
 let authToken = '';
 
 export function setApiToken(token: string) {
   authToken = token;
+}
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
 }
 
 export interface BackendHealth {
@@ -209,6 +220,9 @@ export interface BackendAuthUser {
   role_code: string;
   role_label: string;
   permissions: string[];
+  department_scope: string[];
+  department_can_view: boolean;
+  department_can_entry: boolean;
 }
 
 export interface BackendUserRecord {
@@ -216,6 +230,10 @@ export interface BackendUserRecord {
   username: string;
   display_name: string;
   role_code: string;
+  permissions_json: string[] | string | null;
+  department_scope_json: string[] | string | null;
+  department_can_view: number | boolean;
+  department_can_entry: number | boolean;
   is_active: number | boolean;
   last_login_at: string | null;
   created_at: string;
@@ -237,9 +255,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(body || `HTTP ${response.status}`);
+    const message = parseErrorMessage(body) || `HTTP ${response.status}`;
+    if (response.status === 401) {
+      authToken = '';
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    }
+    throw new ApiError(response.status, message);
   }
   return response.json() as Promise<T>;
+}
+
+function parseErrorMessage(body: string) {
+  if (!body) {
+    return '';
+  }
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown };
+    return typeof parsed.detail === 'string' ? parsed.detail : body;
+  } catch {
+    return body;
+  }
 }
 
 function query(params: Record<string, string | number | undefined>) {
@@ -262,8 +297,18 @@ export const api = {
     }),
   me: () => request<{ user: BackendAuthUser }>('/auth/me'),
   users: () => request<{ items: BackendUserRecord[] }>('/auth/users'),
-  createUser: (data: { username: string; password: string; display_name: string; role_code: string }) =>
+  createUser: (data: {
+    username: string;
+    password: string;
+    display_name: string;
+    role_code: string;
+    permissions: string[];
+    department_scope: string[];
+    department_can_view: boolean;
+    department_can_entry: boolean;
+  }) =>
     request<{ items: BackendUserRecord[] }>('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
+  deleteUser: (userId: number) => request<{ items: BackendUserRecord[] }>(`/auth/users/${userId}`, { method: 'DELETE' }),
   health: () => request<BackendHealth>('/health'),
   importExcel: () => request<{ success_rows: number; failed_rows: number }>('/import/excel', { method: 'POST' }),
   dashboardSummary: () => request<BackendDashboardSummary>('/dashboard/summary'),

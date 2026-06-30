@@ -28,6 +28,7 @@ import {
   BackendPurchaseRecord,
   BackendSalesRecord,
   BackendUserRecord,
+  UNAUTHORIZED_EVENT,
 } from './api';
 import { AuthUser, hasPermission, normalizeUser } from './lib/permissions';
 
@@ -36,7 +37,7 @@ import LedgerScreen from './components/LedgerScreen';
 import OrdersScreen from './components/OrdersScreen';
 import PurchasesScreen from './components/PurchasesScreen';
 import SalesScreen from './components/SalesScreen';
-import SystemScreen from './components/SystemScreen';
+import SystemScreen, { CreateUserPayload } from './components/SystemScreen';
 
 const fallbackText = '-';
 const ztfsIconLogo = new URL('./logo/中通服图标LOGO.png', import.meta.url).href;
@@ -177,6 +178,21 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState('');
   const [error, setError] = useState('');
 
+  const clearSession = () => {
+    window.localStorage.removeItem('erp_auth_token');
+    api.setToken('');
+    setCurrentUser(null);
+    setCurrentScreen('dashboard');
+    setUsers([]);
+    setLedgers([]);
+    setOrders([]);
+    setPurchases([]);
+    setSales([]);
+    setLogs([]);
+    setBackups([]);
+    setLastUpdated('');
+  };
+
   async function loadBackendData(user = currentUser) {
     setError('');
     try {
@@ -226,6 +242,16 @@ export default function App() {
       .finally(() => setAuthLoading(false));
   }, []);
 
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      clearSession();
+      setLoginError('登录已过期，请重新登录');
+      setAuthLoading(false);
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, []);
+
   const handleLogin = async (username: string, password: string) => {
     setLoginError('');
     try {
@@ -242,21 +268,17 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    window.localStorage.removeItem('erp_auth_token');
-    api.setToken('');
-    setCurrentUser(null);
-    setUsers([]);
-    setLedgers([]);
-    setOrders([]);
-    setPurchases([]);
-    setSales([]);
-    setLogs([]);
-    setBackups([]);
-    setLastUpdated('');
+    clearSession();
+    setLoginError('');
   };
 
-  const handleCreateUser = async (data: { username: string; password: string; display_name: string; role_code: string }) => {
+  const handleCreateUser = async (data: CreateUserPayload) => {
     const result = await api.createUser(data);
+    setUsers(result.items);
+  };
+
+  const handleDeleteUser = async (userId: number) => {
+    const result = await api.deleteUser(userId);
     setUsers(result.items);
   };
 
@@ -466,9 +488,12 @@ export default function App() {
               backups={backups}
               users={users}
               canManageUsers={canManageSystem}
+              departments={ledgers.map((item) => item.department).filter((department) => department && department !== fallbackText)}
+              currentUserId={currentUser.id}
               onAddBackup={handleAddBackup}
               onRefresh={handleRefreshAll}
               onCreateUser={handleCreateUser}
+              onDeleteUser={handleDeleteUser}
             />
           )}
         </main>
@@ -478,15 +503,19 @@ export default function App() {
 }
 
 function LoginScreen({ error, onLogin }: { error: string; onLogin: (username: string, password: string) => Promise<void> }) {
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    const normalizedUsername = username.trim();
+    if (!normalizedUsername || !password) {
+      return;
+    }
     setSubmitting(true);
     try {
-      await onLogin(username, password);
+      await onLogin(normalizedUsername, password);
     } finally {
       setSubmitting(false);
     }
@@ -506,13 +535,30 @@ function LoginScreen({ error, onLogin }: { error: string; onLogin: (username: st
           {error && <div className="px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-xs text-rose-600">{error}</div>}
           <label className="space-y-1.5 block">
             <span className="text-xs font-semibold text-slate-600">账号</span>
-            <input value={username} onChange={(event) => setUsername(event.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500" />
+            <input
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoComplete="username"
+              required
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500"
+            />
           </label>
           <label className="space-y-1.5 block">
             <span className="text-xs font-semibold text-slate-600">密码</span>
-            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500" />
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:border-blue-500"
+            />
           </label>
-          <button type="submit" disabled={submitting} className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60">
+          <button
+            type="submit"
+            disabled={submitting || !username.trim() || !password}
+            className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold disabled:opacity-60"
+          >
             {submitting ? '登录中...' : '登录'}
           </button>
         </div>

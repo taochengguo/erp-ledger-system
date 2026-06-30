@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from ..auth import CurrentUser, require_permission
+from ..auth import CurrentUser, apply_department_scope, can_access_department, get_current_user, require_permission
 from ..db import db
 from ..serializers import clean_row, clean_rows
 
@@ -56,6 +56,7 @@ def list_sales(
     department: str | None = None,
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     conditions = ["1=1"]
     params: dict[str, object] = {"limit": limit, "offset": offset}
@@ -71,6 +72,7 @@ def list_sales(
     if department:
         conditions.append("department = :department")
         params["department"] = department
+    apply_department_scope(conditions, params, user)
     where_sql = " AND ".join(conditions)
     with db() as conn:
         total = conn.execute(text(f"SELECT COUNT(*) FROM v_order_line_finance WHERE {where_sql}"), params).scalar()
@@ -92,7 +94,7 @@ def list_sales(
 
 
 @router.get("/by-order")
-def get_sales_detail_by_order(project_id: str, order_id: str) -> dict:
+def get_sales_detail_by_order(project_id: str, order_id: str, user: CurrentUser = Depends(get_current_user)) -> dict:
     with db() as conn:
         summary_rows = conn.execute(
             text(
@@ -114,6 +116,11 @@ def get_sales_detail_by_order(project_id: str, order_id: str) -> dict:
         ).mappings().all()
         if not summary_rows:
             raise HTTPException(status_code=404, detail="Sales order not found")
+        if any(
+            not can_access_department(user, str(row["department"]) if row["department"] is not None else None)
+            for row in summary_rows
+        ):
+            raise HTTPException(status_code=403, detail="Department permission denied")
 
         line_filter_sql = """
             SELECT order_line_id
@@ -168,7 +175,7 @@ def get_sales_detail_by_order(project_id: str, order_id: str) -> dict:
 
 
 @router.get("/{order_line_id}")
-def get_sales_detail(order_line_id: int) -> dict:
+def get_sales_detail(order_line_id: int, user: CurrentUser = Depends(get_current_user)) -> dict:
     with db() as conn:
         summary = conn.execute(
             text(
@@ -189,6 +196,8 @@ def get_sales_detail(order_line_id: int) -> dict:
         ).mappings().first()
         if summary is None:
             raise HTTPException(status_code=404, detail="Sales order line not found")
+        if not can_access_department(user, str(summary["department"]) if summary["department"] is not None else None):
+            raise HTTPException(status_code=403, detail="Department permission denied")
 
         contracts = conn.execute(
             text(
@@ -240,9 +249,9 @@ def get_sales_detail(order_line_id: int) -> dict:
 def add_sales_contract(
     order_line_id: int,
     payload: SalesContractCreate,
-    _: CurrentUser = Depends(require_permission("sales_entry")),
+    user: CurrentUser = Depends(require_permission("sales_entry")),
 ) -> dict:
-    _ensure_order_line(order_line_id)
+    _ensure_order_line(order_line_id, user, require_entry=True)
     with db() as conn:
         conn.execute(
             text(
@@ -259,16 +268,16 @@ def add_sales_contract(
             ),
             {"order_line_id": order_line_id, **_payload_dict(payload)},
         )
-    return get_sales_detail(order_line_id)
+    return get_sales_detail(order_line_id, user)
 
 
 @router.post("/{order_line_id}/invoices")
 def add_sales_invoice(
     order_line_id: int,
     payload: SalesInvoiceCreate,
-    _: CurrentUser = Depends(require_permission("sales_entry")),
+    user: CurrentUser = Depends(require_permission("sales_entry")),
 ) -> dict:
-    _ensure_order_line(order_line_id)
+    _ensure_order_line(order_line_id, user, require_entry=True)
     with db() as conn:
         phase_no = _next_phase(conn, "sales_invoice", order_line_id)
         conn.execute(
@@ -286,16 +295,16 @@ def add_sales_invoice(
             ),
             {"order_line_id": order_line_id, "phase_no": phase_no, **_payload_dict(payload)},
         )
-    return get_sales_detail(order_line_id)
+    return get_sales_detail(order_line_id, user)
 
 
 @router.post("/{order_line_id}/receipts")
 def add_sales_receipt(
     order_line_id: int,
     payload: SalesReceiptCreate,
-    _: CurrentUser = Depends(require_permission("sales_entry")),
+    user: CurrentUser = Depends(require_permission("sales_entry")),
 ) -> dict:
-    _ensure_order_line(order_line_id)
+    _ensure_order_line(order_line_id, user, require_entry=True)
     with db() as conn:
         phase_no = _next_phase(conn, "sales_receipt", order_line_id)
         conn.execute(
@@ -311,17 +320,25 @@ def add_sales_receipt(
             ),
             {"order_line_id": order_line_id, "phase_no": phase_no, **_payload_dict(payload)},
         )
-    return get_sales_detail(order_line_id)
+    return get_sales_detail(order_line_id, user)
 
 
-def _ensure_order_line(order_line_id: int) -> None:
+def _ensure_order_line(order_line_id: int, user: CurrentUser, require_entry: bool = False) -> None:
     with db() as conn:
-        exists = conn.execute(
-            text("SELECT 1 FROM order_line WHERE id = :order_line_id AND deleted_at IS NULL"),
+        row = conn.execute(
+            text(
+                """
+                SELECT department
+                FROM v_order_line_finance
+                WHERE order_line_id = :order_line_id
+                """
+            ),
             {"order_line_id": order_line_id},
-        ).scalar()
-    if not exists:
+        ).mappings().first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Order line not found")
+    if not can_access_department(user, str(row["department"]) if row["department"] is not None else None, require_entry):
+        raise HTTPException(status_code=403, detail="Department permission denied")
 
 
 def _payload_dict(payload: BaseModel) -> dict:

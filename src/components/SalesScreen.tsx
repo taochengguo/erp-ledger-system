@@ -14,6 +14,7 @@ import {
 import { api, BackendSalesDetail } from '../api';
 import { SalesRecord } from '../types';
 import { buildSalesInvoiceDraft, getNextReceiptPhase } from '../lib/salesDetailModel';
+import { applySalesFilters, emptySalesFilters, submitQueryFilters } from '../lib/queryFilterModel';
 
 interface SalesScreenProps {
   sales: SalesRecord[];
@@ -55,6 +56,7 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
   const [orderId, setOrderId] = useState('');
   const [manager, setManager] = useState('');
   const [department, setDepartment] = useState('');
+  const [submittedFilters, setSubmittedFilters] = useState(emptySalesFilters);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedSale, setSelectedSale] = useState<SalesRecord | null>(null);
   const [detail, setDetail] = useState<BackendSalesDetail | null>(null);
@@ -87,14 +89,8 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
   const itemsPerPage = 5;
 
   const filteredSales = useMemo(() => {
-    return sales.filter((item) => {
-      if (projectId && !item.projectId.toLowerCase().includes(projectId.toLowerCase())) return false;
-      if (orderId && !item.orderId.toLowerCase().includes(orderId.toLowerCase())) return false;
-      if (manager && !item.manager.toLowerCase().includes(manager.toLowerCase())) return false;
-      if (department && item.department !== department) return false;
-      return true;
-    });
-  }, [sales, projectId, orderId, manager, department]);
+    return applySalesFilters(sales, submittedFilters);
+  }, [sales, submittedFilters]);
 
   const paginatedSales = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -112,6 +108,19 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
     setOrderId('');
     setManager('');
     setDepartment('');
+    setSubmittedFilters(emptySalesFilters);
+    setCurrentPage(1);
+  };
+
+  const handleSearch = () => {
+    setSubmittedFilters(
+      submitQueryFilters({
+        projectId,
+        orderId,
+        manager,
+        department,
+      }),
+    );
     setCurrentPage(1);
   };
 
@@ -215,12 +224,12 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
 
       <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-          <FilterInput label="项目编号" placeholder="输入项目编号" value={projectId} onChange={(value) => { setProjectId(value); setCurrentPage(1); }} />
-          <FilterInput label="订单号" placeholder="输入订单号" value={orderId} onChange={(value) => { setOrderId(value); setCurrentPage(1); }} />
-          <FilterInput label="客户经理" placeholder="请输入客户经理姓名" value={manager} onChange={(value) => { setManager(value); setCurrentPage(1); }} />
+          <FilterInput label="项目编号" placeholder="输入项目编号" value={projectId} onChange={setProjectId} />
+          <FilterInput label="订单号" placeholder="输入订单号" value={orderId} onChange={setOrderId} />
+          <FilterInput label="客户经理" placeholder="请输入客户经理姓名" value={manager} onChange={setManager} />
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-500">部门</label>
-            <select value={department} onChange={(e) => { setDepartment(e.target.value); setCurrentPage(1); }} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-white text-xs text-slate-700">
+            <select value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-white text-xs text-slate-700">
               <option value="">全部部门</option>
               <option value="IT基础设施部">IT基础设施部</option>
               <option value="安防事业部">安防事业部</option>
@@ -234,7 +243,7 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
             <RotateCcw className="w-3.5 h-3.5" />
             <span>重置</span>
           </button>
-          <button className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold">
+          <button onClick={handleSearch} className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold">
             <Search className="w-3.5 h-3.5" />
             <span>查询</span>
           </button>

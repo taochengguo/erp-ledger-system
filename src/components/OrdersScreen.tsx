@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { OrderRecord } from '../types';
 import { ORDER_IMPORT_TEMPLATE_CSV, parseOrderImportCsv } from '../lib/orderImportTemplate';
+import { applyOrderFilters, emptyOrderFilters, submitQueryFilters } from '../lib/queryFilterModel';
 
 interface OrderPurchaseEntry {
   id: string;
@@ -58,6 +59,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
   const [clientUnit, setClientUnit] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [submittedFilters, setSubmittedFilters] = useState(emptyOrderFilters);
   const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
   const [activeEntryModal, setActiveEntryModal] = useState<'purchase' | 'delivery' | null>(null);
   const [orderPurchases, setOrderPurchases] = useState<Record<string, OrderPurchaseEntry[]>>({});
@@ -122,22 +124,29 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
     setClientUnit('');
     setStartDate('');
     setEndDate('');
+    setSubmittedFilters(emptyOrderFilters);
+    setCurrentPage(1);
+  };
+
+  const handleSearch = () => {
+    setSubmittedFilters(
+      submitQueryFilters({
+        projectId,
+        orderId,
+        orderDate,
+        businessType,
+        clientUnit,
+        startDate,
+        endDate,
+      }),
+    );
     setCurrentPage(1);
   };
 
   // Filtered Orders
   const filteredOrders = useMemo(() => {
-    return orders.filter(item => {
-      if (projectId && !item.projectId.toLowerCase().includes(projectId.toLowerCase())) return false;
-      if (orderId && !item.orderId.toLowerCase().includes(orderId.toLowerCase())) return false;
-      if (orderDate && item.orderDate !== orderDate) return false;
-      if (businessType && !item.businessType.toLowerCase().includes(businessType.toLowerCase())) return false;
-      if (clientUnit && !item.clientUnit.toLowerCase().includes(clientUnit.toLowerCase())) return false;
-      if (startDate && item.orderDate < startDate) return false;
-      if (endDate && item.orderDate > endDate) return false;
-      return true;
-    });
-  }, [orders, projectId, orderId, orderDate, businessType, clientUnit, startDate, endDate]);
+    return applyOrderFilters(orders, submittedFilters);
+  }, [orders, submittedFilters]);
 
   // Paginated Orders
   const paginatedOrders = useMemo(() => {
@@ -387,7 +396,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               type="text" 
               placeholder="输入项目编号"
               value={projectId}
-              onChange={e => { setProjectId(e.target.value); setCurrentPage(1); }}
+              onChange={e => setProjectId(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -399,7 +408,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               type="text" 
               placeholder="输入订单号"
               value={orderId}
-              onChange={e => { setOrderId(e.target.value); setCurrentPage(1); }}
+              onChange={e => setOrderId(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -410,7 +419,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
             <input 
               type="date" 
               value={orderDate}
-              onChange={e => { setOrderDate(e.target.value); setCurrentPage(1); }}
+              onChange={e => setOrderDate(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -422,7 +431,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               type="text"
               placeholder="输入业务类型"
               value={businessType}
-              onChange={e => { setBusinessType(e.target.value); setCurrentPage(1); }}
+              onChange={e => setBusinessType(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -434,7 +443,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               type="text" 
               placeholder="输入客户名称"
               value={clientUnit}
-              onChange={e => { setClientUnit(e.target.value); setCurrentPage(1); }}
+              onChange={e => setClientUnit(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
             />
           </div>
@@ -446,14 +455,14 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               <input 
                 type="date" 
                 value={startDate}
-                onChange={e => { setStartDate(e.target.value); setCurrentPage(1); }}
+                onChange={e => setStartDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
               />
               <span className="text-slate-400 text-xs">至</span>
               <input 
                 type="date" 
                 value={endDate}
-                onChange={e => { setEndDate(e.target.value); setCurrentPage(1); }}
+                onChange={e => setEndDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
               />
             </div>
@@ -469,6 +478,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
             <span>重置</span>
           </button>
           <button 
+            onClick={handleSearch}
             className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold"
           >
             <Search className="w-3.5 h-3.5" />

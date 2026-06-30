@@ -3,12 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 
-from ..auth import CurrentUser, require_permission
+from ..auth import CurrentUser, get_current_user, require_permission
 from ..db import db
 from ..importer import import_excel
 from ..serializers import clean_rows
 
-router = APIRouter(tags=["system"])
+router = APIRouter(tags=["system"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/api/import/excel")
