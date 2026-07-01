@@ -9,18 +9,23 @@ import {
   FileText,
   ReceiptText,
   CreditCard,
+  Pencil,
+  Trash2,
   X,
 } from 'lucide-react';
 import { api, BackendPurchaseDetail } from '../api';
 import { PurchaseRecord } from '../types';
-import { applyPurchaseFilters, emptyPurchaseFilters, submitQueryFilters } from '../lib/queryFilterModel';
+import { applyPurchaseFilters, emptyPurchaseFilters, getDepartmentOptions, submitQueryFilters } from '../lib/queryFilterModel';
 
 interface PurchasesScreenProps {
   purchases: PurchaseRecord[];
   canEnterPurchases: boolean;
+  canEditPurchases: boolean;
+  canDeletePurchases: boolean;
 }
 
 type EntryMode = 'contract' | 'invoice' | 'payment';
+type EditingRecord = { mode: EntryMode; id: number } | null;
 
 const moneyFormatter = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2 });
 
@@ -43,11 +48,15 @@ function parseAmount(value: string) {
   return value === '' ? null : Number(value);
 }
 
-export default function PurchasesScreen({ purchases, canEnterPurchases }: PurchasesScreenProps) {
+export default function PurchasesScreen({ purchases, canEnterPurchases, canEditPurchases, canDeletePurchases }: PurchasesScreenProps) {
   const [projectId, setProjectId] = useState('');
   const [orderId, setOrderId] = useState('');
   const [manager, setManager] = useState('');
   const [department, setDepartment] = useState('');
+  const [supplier, setSupplier] = useState('');
+  const [contractNo, setContractNo] = useState('');
+  const [paymentStartDate, setPaymentStartDate] = useState('');
+  const [paymentEndDate, setPaymentEndDate] = useState('');
   const [submittedFilters, setSubmittedFilters] = useState(emptyPurchaseFilters);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedPurchase, setSelectedPurchase] = useState<PurchaseRecord | null>(null);
@@ -55,6 +64,7 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [entryMode, setEntryMode] = useState<EntryMode | null>(null);
+  const [editingRecord, setEditingRecord] = useState<EditingRecord>(null);
   const [saving, setSaving] = useState(false);
   const [contractForm, setContractForm] = useState({
     purchase_contract_no: '',
@@ -89,12 +99,17 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
   const totalPages = Math.max(1, Math.ceil(filteredPurchases.length / itemsPerPage));
   const paginationItems = getPaginationItems(totalPages);
   const nextPaymentPhase = (detail?.payments.length || 0) + 1;
+  const departmentOptions = useMemo(() => getDepartmentOptions(purchases), [purchases]);
 
   const handleReset = () => {
     setProjectId('');
     setOrderId('');
     setManager('');
     setDepartment('');
+    setSupplier('');
+    setContractNo('');
+    setPaymentStartDate('');
+    setPaymentEndDate('');
     setSubmittedFilters(emptyPurchaseFilters);
     setCurrentPage(1);
   };
@@ -106,6 +121,10 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
         orderId,
         manager,
         department,
+        supplier,
+        contractNo,
+        paymentStartDate,
+        paymentEndDate,
       }),
     );
     setCurrentPage(1);
@@ -120,6 +139,7 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
     setSelectedPurchase(item);
     setDetail(null);
     setEntryMode(null);
+    setEditingRecord(null);
     setDetailError('');
     setDetailLoading(true);
     try {
@@ -136,6 +156,7 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
     setSelectedPurchase(null);
     setDetail(null);
     setEntryMode(null);
+    setEditingRecord(null);
     setDetailError('');
   };
 
@@ -143,6 +164,61 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
     setContractForm({ purchase_contract_no: '', payment_terms: '', performance_period: '', signed_amount: '', unsigned_amount: '' });
     setInvoiceForm({ received_invoice_date: '', invoice_no: '', invoice_amount: '' });
     setPaymentForm({ due_payment_date: '', payment_date: '', payment_voucher_no: '', payment_amount: '' });
+  };
+
+  const openCreateEntry = (mode: EntryMode) => {
+    setEditingRecord(null);
+    setEntryMode(mode);
+    resetEntryForms();
+  };
+
+  const openEditEntry = (mode: EntryMode, item: BackendPurchaseDetail['contracts'][number] | BackendPurchaseDetail['invoices'][number] | BackendPurchaseDetail['payments'][number]) => {
+    setEditingRecord({ mode, id: item.id });
+    setEntryMode(mode);
+    if (mode === 'contract') {
+      const contract = item as BackendPurchaseDetail['contracts'][number];
+      setContractForm({
+        purchase_contract_no: contract.purchase_contract_no || '',
+        payment_terms: contract.payment_terms || '',
+        performance_period: contract.performance_period || '',
+        signed_amount: contract.signed_amount === null || contract.signed_amount === undefined ? '' : String(contract.signed_amount),
+        unsigned_amount: contract.unsigned_amount === null || contract.unsigned_amount === undefined ? '' : String(contract.unsigned_amount),
+      });
+    } else if (mode === 'invoice') {
+      const invoice = item as BackendPurchaseDetail['invoices'][number];
+      setInvoiceForm({
+        received_invoice_date: invoice.received_invoice_date || '',
+        invoice_no: invoice.invoice_no || '',
+        invoice_amount: invoice.invoice_amount === null || invoice.invoice_amount === undefined ? '' : String(invoice.invoice_amount),
+      });
+    } else {
+      const payment = item as BackendPurchaseDetail['payments'][number];
+      setPaymentForm({
+        due_payment_date: payment.due_payment_date || '',
+        payment_date: payment.payment_date || '',
+        payment_voucher_no: payment.payment_voucher_no || '',
+        payment_amount: payment.payment_amount === null || payment.payment_amount === undefined ? '' : String(payment.payment_amount),
+      });
+    }
+  };
+
+  const handleDeleteEntry = async (mode: EntryMode, id: number) => {
+    const confirmed = window.confirm('确定删除这条采购信息吗？');
+    if (!confirmed) return;
+    setSaving(true);
+    setDetailError('');
+    try {
+      const updated = mode === 'contract'
+        ? await api.deletePurchaseContract(id)
+        : mode === 'invoice'
+          ? await api.deletePurchaseInvoice(id)
+          : await api.deletePurchasePayment(id);
+      setDetail(updated);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : '删除失败');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleEntrySubmit = async (event: React.FormEvent) => {
@@ -153,29 +229,39 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
     try {
       let updated: BackendPurchaseDetail;
       if (entryMode === 'contract') {
-        updated = await api.addPurchaseContract(selectedPurchase.orderLineId, {
+        const data = {
           purchase_contract_no: contractForm.purchase_contract_no || null,
           payment_terms: contractForm.payment_terms || null,
           performance_period: contractForm.performance_period || null,
           signed_amount: parseAmount(contractForm.signed_amount),
           unsigned_amount: parseAmount(contractForm.unsigned_amount),
-        });
+        };
+        updated = editingRecord
+          ? await api.updatePurchaseContract(editingRecord.id, data)
+          : await api.addPurchaseContract(selectedPurchase.orderLineId, data);
       } else if (entryMode === 'invoice') {
-        updated = await api.addPurchaseInvoice(selectedPurchase.orderLineId, {
+        const data = {
           received_invoice_date: invoiceForm.received_invoice_date || null,
           invoice_no: invoiceForm.invoice_no || null,
           invoice_amount: parseAmount(invoiceForm.invoice_amount),
-        });
+        };
+        updated = editingRecord
+          ? await api.updatePurchaseInvoice(editingRecord.id, data)
+          : await api.addPurchaseInvoice(selectedPurchase.orderLineId, data);
       } else {
-        updated = await api.addPurchasePayment(selectedPurchase.orderLineId, {
+        const data = {
           due_payment_date: nextPaymentPhase === 1 ? paymentForm.due_payment_date || null : null,
           payment_date: paymentForm.payment_date || null,
           payment_voucher_no: paymentForm.payment_voucher_no || null,
           payment_amount: parseAmount(paymentForm.payment_amount),
-        });
+        };
+        updated = editingRecord
+          ? await api.updatePurchasePayment(editingRecord.id, { ...data, due_payment_date: paymentForm.due_payment_date || null })
+          : await api.addPurchasePayment(selectedPurchase.orderLineId, data);
       }
       setDetail(updated);
       setEntryMode(null);
+      setEditingRecord(null);
       resetEntryForms();
     } catch (error) {
       setDetailError(error instanceof Error ? error.message : '保存失败');
@@ -200,6 +286,28 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
           <FilterInput label="项目编号" placeholder="输入项目编号" value={projectId} onChange={setProjectId} />
           <FilterInput label="订单号" placeholder="输入订单号" value={orderId} onChange={setOrderId} />
           <FilterInput label="客户经理" placeholder="输入经理姓名" value={manager} onChange={setManager} />
+          <FilterInput label="采购厂家" placeholder="输入采购厂家" value={supplier} onChange={setSupplier} />
+          <FilterInput label="公司合同号" placeholder="输入公司合同号" value={contractNo} onChange={setContractNo} />
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-xs font-medium text-slate-500">回款时间</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                lang="zh-CN"
+                value={paymentStartDate}
+                onChange={(e) => setPaymentStartDate(e.target.value)}
+                className="min-w-0 w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
+              />
+              <span className="shrink-0 text-xs text-slate-400">至</span>
+              <input
+                type="date"
+                lang="zh-CN"
+                value={paymentEndDate}
+                onChange={(e) => setPaymentEndDate(e.target.value)}
+                className="min-w-0 w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
+              />
+            </div>
+          </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-500">部门</label>
             <select
@@ -208,9 +316,11 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-white text-xs text-slate-700"
             >
               <option value="">全部部门</option>
-              <option value="IT基础设施部">IT基础设施部</option>
-              <option value="安防事业部">安防事业部</option>
-              <option value="数据研发中心">数据研发中心</option>
+              {departmentOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -367,7 +477,14 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
                         ['履行期限', item.performance_period],
                         ['合同签订金额', formatMoney(item.signed_amount)],
                         ['待签合同金额', formatMoney(item.unsigned_amount)],
-                      ]} />
+                      ]} actions={
+                        <RecordActions
+                          canEdit={canEditPurchases}
+                          canDelete={canDeletePurchases}
+                          onEdit={() => openEditEntry('contract', item)}
+                          onDelete={() => handleDeleteEntry('contract', item.id)}
+                        />
+                      } />
                     ))}
                   </DataBlock>
 
@@ -378,7 +495,14 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
                         ['收票日期', item.received_invoice_date_text || item.received_invoice_date],
                         ['发票号码', item.invoice_no],
                         ['收票金额', formatMoney(item.invoice_amount)],
-                      ]} />
+                      ]} actions={
+                        <RecordActions
+                          canEdit={canEditPurchases}
+                          canDelete={canDeletePurchases}
+                          onEdit={() => openEditEntry('invoice', item)}
+                          onDelete={() => handleDeleteEntry('invoice', item.id)}
+                        />
+                      } />
                     ))}
                   </DataBlock>
 
@@ -390,14 +514,21 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
                         ['付款日期', item.payment_date_text || item.payment_date],
                         ['付款凭证号', item.payment_voucher_no],
                         ['付款金额', formatMoney(item.payment_amount)],
-                      ]} />
+                      ]} actions={
+                        <RecordActions
+                          canEdit={canEditPurchases}
+                          canDelete={canDeletePurchases}
+                          onEdit={() => openEditEntry('payment', item)}
+                          onDelete={() => handleDeleteEntry('payment', item.id)}
+                        />
+                      } />
                     ))}
                   </DataBlock>
 
                   {canEnterPurchases && <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-100">
-                    <EntryButton icon={<FileText className="w-4 h-4" />} label="录入采购合同" onClick={() => setEntryMode('contract')} />
-                    <EntryButton icon={<ReceiptText className="w-4 h-4" />} label="录入收票情况" onClick={() => setEntryMode('invoice')} />
-                    <EntryButton icon={<CreditCard className="w-4 h-4" />} label="录入付款情况" onClick={() => setEntryMode('payment')} />
+                    <EntryButton icon={<FileText className="w-4 h-4" />} label="录入采购合同" onClick={() => openCreateEntry('contract')} />
+                    <EntryButton icon={<ReceiptText className="w-4 h-4" />} label="录入收票情况" onClick={() => openCreateEntry('invoice')} />
+                    <EntryButton icon={<CreditCard className="w-4 h-4" />} label="录入付款情况" onClick={() => openCreateEntry('payment')} />
                   </div>}
                 </>
               )}
@@ -408,8 +539,8 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
             <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 p-4">
               <form onSubmit={handleEntrySubmit} className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-                  <h3 className="text-sm font-bold text-slate-900">{entryMode === 'contract' ? '录入采购合同' : entryMode === 'invoice' ? '录入收票情况' : `录入付款情况（第 ${nextPaymentPhase} 期）`}</h3>
-                  <button type="button" onClick={() => setEntryMode(null)} className="p-1 text-slate-400 hover:text-slate-700">
+                  <h3 className="text-sm font-bold text-slate-900">{editingRecord ? '修改采购信息' : entryMode === 'contract' ? '录入采购合同' : entryMode === 'invoice' ? '录入收票情况' : `录入付款情况（第 ${nextPaymentPhase} 期）`}</h3>
+                  <button type="button" onClick={() => { setEntryMode(null); setEditingRecord(null); }} className="p-1 text-slate-400 hover:text-slate-700">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -432,7 +563,7 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
                   )}
                   {entryMode === 'payment' && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {nextPaymentPhase === 1 && <FormInput label="到期付款日" type="date" value={paymentForm.due_payment_date} onChange={(value) => setPaymentForm({ ...paymentForm, due_payment_date: value })} />}
+                      {(nextPaymentPhase === 1 || editingRecord) && <FormInput label="到期付款日" type="date" value={paymentForm.due_payment_date} onChange={(value) => setPaymentForm({ ...paymentForm, due_payment_date: value })} />}
                       <FormInput label="付款日期" type="date" value={paymentForm.payment_date} onChange={(value) => setPaymentForm({ ...paymentForm, payment_date: value })} />
                       <FormInput label="付款凭证号" value={paymentForm.payment_voucher_no} onChange={(value) => setPaymentForm({ ...paymentForm, payment_voucher_no: value })} />
                       <FormInput label="付款金额" type="number" value={paymentForm.payment_amount} onChange={(value) => setPaymentForm({ ...paymentForm, payment_amount: value })} />
@@ -440,7 +571,7 @@ export default function PurchasesScreen({ purchases, canEnterPurchases }: Purcha
                   )}
                 </div>
                 <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-2">
-                  <button type="button" onClick={() => setEntryMode(null)} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
+                  <button type="button" onClick={() => { setEntryMode(null); setEditingRecord(null); }} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
                   <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
                 </div>
               </form>
@@ -495,18 +626,37 @@ function DataBlock({ title, emptyText, children }: { title: string; emptyText: s
   );
 }
 
-const RecordRow: React.FC<{ values: Array<[string, unknown]> }> = ({ values }) => {
+const RecordRow: React.FC<{ values: Array<[string, unknown]>; actions?: React.ReactNode }> = ({ values, actions }) => {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 rounded-lg border border-slate-200 px-3 py-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[repeat(5,minmax(0,1fr))_72px] gap-3 rounded-lg border border-slate-200 px-3 py-3">
       {values.map(([label, value]) => (
         <div key={label}>
           <p className="text-[11px] text-slate-400">{label}</p>
           <p className="mt-1 text-xs font-medium text-slate-700 break-words">{textValue(value)}</p>
         </div>
       ))}
+      {actions && <div className="flex items-center justify-start sm:justify-end gap-1 lg:col-start-6">{actions}</div>}
     </div>
   );
 };
+
+function RecordActions({ canEdit, canDelete, onEdit, onDelete }: { canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void }) {
+  if (!canEdit && !canDelete) return null;
+  return (
+    <>
+      {canEdit && (
+        <button type="button" onClick={onEdit} title="修改" className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100">
+          <Pencil className="w-4 h-4" />
+        </button>
+      )}
+      {canDelete && (
+        <button type="button" onClick={onDelete} title="删除" className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      )}
+    </>
+  );
+}
 
 function EntryButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
@@ -521,7 +671,7 @@ function FormInput({ label, value, onChange, type = 'text', className = '' }: { 
   return (
     <label className={`space-y-1 ${className}`}>
       <span className="block text-xs font-semibold text-slate-600">{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+      <input type={type} lang={type === 'date' ? 'zh-CN' : undefined} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
     </label>
   );
 }

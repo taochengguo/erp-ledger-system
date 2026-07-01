@@ -16,10 +16,11 @@ import {
   EyeOff,
   Plus,
   X,
+  Pencil,
   Trash2
 } from 'lucide-react';
 import { BackendUserRecord } from '../api';
-import { Permission, ROLE_LABELS, RoleCode } from '../lib/permissions';
+import { Permission, ROLE_LABELS, RoleCode, SYSTEM_PERMISSION_OPTIONS } from '../lib/permissions';
 import { OperationLog, BackupInfo } from '../types';
 
 export interface CreateUserPayload {
@@ -33,6 +34,8 @@ export interface CreateUserPayload {
   department_can_entry: boolean;
 }
 
+export type UpdateUserPermissionsPayload = Omit<CreateUserPayload, 'username' | 'password' | 'display_name'>;
+
 interface SystemScreenProps {
   logs: OperationLog[];
   backups: BackupInfo[];
@@ -43,15 +46,11 @@ interface SystemScreenProps {
   departments: string[];
   currentUserId: number;
   onCreateUser: (data: CreateUserPayload) => Promise<void>;
+  onUpdateUserPermissions: (userId: number, data: UpdateUserPermissionsPayload) => Promise<void>;
   onDeleteUser: (userId: number) => Promise<void>;
 }
 
-const PERMISSION_OPTIONS: Array<{ value: Permission; label: string }> = [
-  { value: 'order_entry', label: '订单详情录入' },
-  { value: 'purchase_entry', label: '采购详情录入' },
-  { value: 'sales_entry', label: '销售详情录入' },
-  { value: 'system_admin', label: '系统权限' },
-];
+const PERMISSION_OPTIONS = SYSTEM_PERMISSION_OPTIONS;
 const PERMISSION_LABELS = Object.fromEntries(PERMISSION_OPTIONS.map((item) => [item.value, item.label])) as Record<Permission, string>;
 
 function deriveRoleCode(permissions: Permission[]): RoleCode {
@@ -83,6 +82,7 @@ export default function SystemScreen({
   departments,
   currentUserId,
   onCreateUser,
+  onUpdateUserPermissions,
   onDeleteUser,
 }: SystemScreenProps) {
   // Pagination State for Logs
@@ -106,6 +106,15 @@ export default function SystemScreen({
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [departmentInput, setDepartmentInput] = useState('');
+  const [editingUser, setEditingUser] = useState<BackendUserRecord | null>(null);
+  const [editForm, setEditForm] = useState<UpdateUserPermissionsPayload>({
+    role_code: 'viewer',
+    permissions: [],
+    department_scope: [],
+    department_can_view: false,
+    department_can_entry: false,
+  });
+  const [editDepartmentInput, setEditDepartmentInput] = useState('');
 
   // Filter logs & backups to show only 5 items per page
   const paginatedLogs = useMemo(() => {
@@ -210,6 +219,73 @@ export default function SystemScreen({
       department_scope: [...prev.department_scope, department],
     }));
     setDepartmentInput('');
+  };
+
+  const toggleEditPermission = (permission: Permission) => {
+    setEditForm((prev) => ({
+      ...prev,
+      permissions: prev.permissions.includes(permission)
+        ? prev.permissions.filter((item) => item !== permission)
+        : [...prev.permissions, permission],
+    }));
+  };
+
+  const toggleEditDepartment = (department: string) => {
+    setEditForm((prev) => ({
+      ...prev,
+      department_scope: prev.department_scope.includes(department)
+        ? prev.department_scope.filter((item) => item !== department)
+        : [...prev.department_scope, department],
+    }));
+  };
+
+  const addEditDepartment = () => {
+    const department = editDepartmentInput.trim();
+    if (!department || editForm.department_scope.includes(department)) {
+      setEditDepartmentInput('');
+      return;
+    }
+    setEditForm((prev) => ({
+      ...prev,
+      department_scope: [...prev.department_scope, department],
+    }));
+    setEditDepartmentInput('');
+  };
+
+  const openPermissionEditor = (user: BackendUserRecord) => {
+    const permissions = parseList(user.permissions_json) as Permission[];
+    setEditingUser(user);
+    setEditForm({
+      role_code: user.role_code,
+      permissions,
+      department_scope: parseList(user.department_scope_json),
+      department_can_view: Boolean(user.department_can_view),
+      department_can_entry: Boolean(user.department_can_entry),
+    });
+    setEditDepartmentInput('');
+    setUserMessage('');
+  };
+
+  const closePermissionEditor = () => {
+    setEditingUser(null);
+    setEditDepartmentInput('');
+  };
+
+  const handlePermissionSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingUser) return;
+    setUserMessage('');
+    if (editForm.department_scope.length > 0 && !editForm.department_can_view && !editForm.department_can_entry) {
+      setUserMessage('选择部门后至少勾选查看或录入权限');
+      return;
+    }
+    try {
+      await onUpdateUserPermissions(editingUser.id, { ...editForm, role_code: deriveRoleCode(editForm.permissions) });
+      setUserMessage('账号权限修改成功');
+      closePermissionEditor();
+    } catch (error) {
+      setUserMessage(error instanceof Error ? error.message : '账号权限修改失败');
+    }
   };
 
   const handleDeleteUser = async (user: BackendUserRecord) => {
@@ -386,15 +462,26 @@ export default function SystemScreen({
                       <td className="px-4 py-2">{user.is_active ? '启用' : '停用'}</td>
                       <td className="px-4 py-2 font-mono text-slate-400">{user.last_login_at || '-'}</td>
                       <td className="px-4 py-2 text-center">
-                        <button
-                          type="button"
-                          disabled={user.id === currentUserId || !user.is_active}
-                          onClick={() => handleDeleteUser(user)}
-                          title={user.id === currentUserId ? '不能删除当前登录账号' : '删除账号'}
-                          className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="inline-flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            disabled={user.id === currentUserId || !user.is_active}
+                            onClick={() => openPermissionEditor(user)}
+                            title={user.id === currentUserId ? '不能修改当前登录账号权限' : '修改权限'}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={user.id === currentUserId || !user.is_active}
+                            onClick={() => handleDeleteUser(user)}
+                            title={user.id === currentUserId ? '不能删除当前登录账号' : '删除账号'}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -403,6 +490,88 @@ export default function SystemScreen({
             </div>
           </div>
         </section>
+      )}
+
+      {editingUser && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <form onSubmit={handlePermissionSubmit} className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h3 className="text-sm font-bold text-slate-900">修改账号权限：{editingUser.username}</h3>
+              <button type="button" onClick={closePermissionEditor} className="p-1 text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                  <ShieldCheck className="w-4 h-4 text-blue-600" />
+                  <span>功能权限</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {PERMISSION_OPTIONS.map((item) => (
+                    <label key={item.value} className="flex items-center gap-2 px-2.5 py-2 rounded border border-slate-100 bg-slate-50 text-xs text-slate-700">
+                      <input type="checkbox" checked={editForm.permissions.includes(item.value)} onChange={() => toggleEditPermission(item.value)} />
+                      <span>{item.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-slate-700">部门权限</span>
+                  <div className="flex items-center gap-3 text-xs text-slate-600">
+                    <label className="inline-flex items-center gap-1.5">
+                      <input type="checkbox" checked={editForm.department_can_view} onChange={(e) => setEditForm({ ...editForm, department_can_view: e.target.checked })} />
+                      <span>查看</span>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5">
+                      <input type="checkbox" checked={editForm.department_can_entry} onChange={(e) => setEditForm({ ...editForm, department_can_entry: e.target.checked })} />
+                      <span>录入</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    list="edit-department-options"
+                    value={editDepartmentInput}
+                    onChange={(event) => setEditDepartmentInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addEditDepartment();
+                      }
+                    }}
+                    placeholder="选择或输入部门"
+                    className="min-w-0 flex-1 px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500"
+                  />
+                  <datalist id="edit-department-options">
+                    {availableDepartments.map((department) => (
+                      <option key={department} value={department} />
+                    ))}
+                  </datalist>
+                  <button type="button" onClick={addEditDepartment} title="添加部门" className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-slate-900 text-white hover:bg-slate-800">
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 min-h-8">
+                  {editForm.department_scope.map((department) => (
+                    <span key={department} className="inline-flex items-center gap-1.5 max-w-full px-2.5 py-1 rounded border border-blue-100 bg-blue-50 text-xs text-blue-700">
+                      <span className="truncate">{department}</span>
+                      <button type="button" onClick={() => toggleEditDepartment(department)} title={`移除 ${department}`} className="text-blue-500 hover:text-blue-800">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                  {editForm.department_scope.length === 0 && <span className="text-xs text-slate-400 py-1">未选择时默认全部部门</span>}
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-2">
+              <button type="button" onClick={closePermissionEditor} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
+              <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">保存权限</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {/* 1. Operation Log Section with 5 per page pagination */}

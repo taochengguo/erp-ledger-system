@@ -9,9 +9,14 @@ import {
   Upload,
   Download,
   Eye,
+  Pencil,
+  Trash2,
   X
 } from 'lucide-react';
 import { OrderRecord } from '../types';
+import {
+  ORDER_DETAIL_TABLE_WIDTHS,
+} from '../lib/orderDetailTables';
 import { ORDER_IMPORT_TEMPLATE_CSV, parseOrderImportCsv } from '../lib/orderImportTemplate';
 import { applyOrderFilters, emptyOrderFilters, submitQueryFilters } from '../lib/queryFilterModel';
 
@@ -40,7 +45,11 @@ interface OrderDeliveryEntry {
 interface OrdersScreenProps {
   orders: OrderRecord[];
   onAddOrder: (order: OrderRecord) => void;
+  onUpdateOrder: (target: OrderRecord, order: OrderRecord) => Promise<void>;
+  onDeleteOrder: (target: OrderRecord) => Promise<void>;
   canEnterOrders: boolean;
+  canEditOrders: boolean;
+  canDeleteOrders: boolean;
 }
 
 function getPaginationItems(totalPages: number): Array<number | 'ellipsis'> {
@@ -50,13 +59,14 @@ function getPaginationItems(totalPages: number): Array<number | 'ellipsis'> {
   return [1, 2, 'ellipsis', totalPages - 1, totalPages];
 }
 
-export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: OrdersScreenProps) {
+export default function OrdersScreen({ orders, onAddOrder, onUpdateOrder, onDeleteOrder, canEnterOrders, canEditOrders, canDeleteOrders }: OrdersScreenProps) {
   // Query Filters State
   const [projectId, setProjectId] = useState('');
   const [orderId, setOrderId] = useState('');
   const [orderDate, setOrderDate] = useState('');
   const [businessType, setBusinessType] = useState('');
   const [clientUnit, setClientUnit] = useState('');
+  const [supplierName, setSupplierName] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [submittedFilters, setSubmittedFilters] = useState(emptyOrderFilters);
@@ -64,6 +74,8 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
   const [activeEntryModal, setActiveEntryModal] = useState<'purchase' | 'delivery' | null>(null);
   const [orderPurchases, setOrderPurchases] = useState<Record<string, OrderPurchaseEntry[]>>({});
   const [orderDeliveries, setOrderDeliveries] = useState<Record<string, OrderDeliveryEntry[]>>({});
+  const [editingPurchaseId, setEditingPurchaseId] = useState<string | null>(null);
+  const [editingDeliveryId, setEditingDeliveryId] = useState<string | null>(null);
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
@@ -71,6 +83,8 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
 
   // New Order Modal State
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<OrderRecord | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
   const [newOrder, setNewOrder] = useState({
     amountType: '全额',
     projectId: '',
@@ -122,6 +136,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
     setOrderDate('');
     setBusinessType('');
     setClientUnit('');
+    setSupplierName('');
     setStartDate('');
     setEndDate('');
     setSubmittedFilters(emptyOrderFilters);
@@ -136,6 +151,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
         orderDate,
         businessType,
         clientUnit,
+        supplierName,
         startDate,
         endDate,
       }),
@@ -205,6 +221,53 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
   const formatOptionalMoney = (value: number | undefined) =>
     value === undefined ? '' : `¥${formatMoney(value)}`;
   const blank = (value: string | number | undefined | null) => value === undefined || value === null ? '' : String(value);
+  const canManageOrderRows = canEditOrders || canDeleteOrders;
+
+  const resetNewPurchase = () => {
+    setNewPurchase({ supplier: '', netPurchaseUnitPrice: '', purchaseUnitPrice: '', netCost: '', purchaseAmount: '' });
+  };
+
+  const resetNewDelivery = () => {
+    setNewDelivery({
+      deliveryDate: new Date().toISOString().split('T')[0],
+      deliveredQty: '',
+      deliveredNetRevenue: '',
+      deliveryValue: '',
+      deliveredNetCost: '',
+      deliveryCost: '',
+      pendingQty: '',
+      pendingNetAmount: '',
+      pendingAmount: '',
+    });
+  };
+
+  const purchaseEntryToForm = (item: OrderPurchaseEntry) => ({
+    supplier: item.supplier || '',
+    netPurchaseUnitPrice: blank(item.netPurchaseUnitPrice),
+    purchaseUnitPrice: blank(item.purchaseUnitPrice),
+    netCost: blank(item.netCost),
+    purchaseAmount: blank(item.purchaseAmount),
+  });
+
+  const deliveryEntryToForm = (item: OrderDeliveryEntry) => ({
+    deliveryDate: item.deliveryDate || new Date().toISOString().split('T')[0],
+    deliveredQty: blank(item.deliveredQty),
+    deliveredNetRevenue: blank(item.deliveredNetRevenue),
+    deliveryValue: blank(item.deliveryValue),
+    deliveredNetCost: blank(item.deliveredNetCost),
+    deliveryCost: blank(item.deliveryCost),
+    pendingQty: blank(item.pendingQty),
+    pendingNetAmount: blank(item.pendingNetAmount),
+    pendingAmount: blank(item.pendingAmount),
+  });
+
+  const closeEntryModal = () => {
+    setActiveEntryModal(null);
+    setEditingPurchaseId(null);
+    setEditingDeliveryId(null);
+    resetNewPurchase();
+    resetNewDelivery();
+  };
 
   const resetNewOrder = () => {
     setNewOrder({
@@ -234,6 +297,76 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
     });
   };
 
+  const orderToForm = (order: OrderRecord) => {
+    const quantityMatch = String(order.quantity || '').match(/[\d.]+/);
+    const unit = order.unitName || String(order.quantity || '').replace(/^[\d.]+\s*/, '') || '套';
+    return {
+      amountType: order.amountType || '全额',
+      projectId: order.projectId,
+      department: order.department || '',
+      branchCompany: order.branchCompany || '',
+      manager: order.manager || '',
+      orderId: order.orderId,
+      orderDate: order.orderDate,
+      statisticalCategory: order.statisticalCategory || '',
+      teamName: order.teamName || '',
+      projectName: order.projectName || '',
+      userName: order.userName || '',
+      regionalPlatform: order.regionalPlatform || '',
+      goodsName: order.goodsName,
+      specModel: order.specModel || '',
+      quantityVal: quantityMatch ? quantityMatch[0] : '',
+      quantityUnit: unit,
+      netUnitPrice: order.netUnitPrice === undefined ? '' : String(order.netUnitPrice),
+      unitPrice: order.unitPrice === undefined ? '' : String(order.unitPrice),
+      netRevenue: order.netRevenue === undefined ? '' : String(order.netRevenue),
+      orderValue: String(order.orderValue || ''),
+      deliveredQty: String(order.deliveredQty || 0),
+      businessType: order.businessType,
+      clientUnit: order.clientUnit,
+    };
+  };
+
+  const formToOrder = (form: typeof newOrder, existing?: OrderRecord): OrderRecord => ({
+    orderLineId: existing?.orderLineId,
+    amountType: form.amountType,
+    projectId: form.projectId,
+    department: form.department,
+    branchCompany: form.branchCompany,
+    manager: form.manager,
+    orderId: form.orderId,
+    orderDate: form.orderDate,
+    statisticalCategory: form.statisticalCategory,
+    teamName: form.teamName,
+    projectName: form.projectName,
+    userName: form.userName,
+    regionalPlatform: form.regionalPlatform,
+    goodsName: form.goodsName,
+    specModel: form.specModel,
+    unitName: form.quantityUnit,
+    quantity: `${form.quantityVal} ${form.quantityUnit}`,
+    netUnitPrice: parseFloat(form.netUnitPrice) || 0,
+    unitPrice: parseFloat(form.unitPrice) || 0,
+    netRevenue: parseFloat(form.netRevenue) || 0,
+    orderValue: parseFloat(form.orderValue) || 0,
+    deliveredQty: parseFloat(form.deliveredQty) || 0,
+    businessType: form.businessType,
+    clientUnit: form.clientUnit,
+    supplierName: existing?.supplierName,
+    purchaseUnitPriceNoTax: existing?.purchaseUnitPriceNoTax,
+    purchaseUnitPrice: existing?.purchaseUnitPrice,
+    costNoTax: existing?.costNoTax,
+    purchaseAmount: existing?.purchaseAmount,
+    deliveryDate: existing?.deliveryDate,
+    deliveryRevenueNoTax: existing?.deliveryRevenueNoTax,
+    deliveryValue: existing?.deliveryValue,
+    deliveryCostNoTax: existing?.deliveryCostNoTax,
+    deliveryCost: existing?.deliveryCost,
+    pendingDeliveryQuantity: existing?.pendingDeliveryQuantity,
+    pendingDeliveryAmountNoTax: existing?.pendingDeliveryAmountNoTax,
+    pendingDeliveryAmount: existing?.pendingDeliveryAmount,
+  });
+
   // Form submit handler
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -242,35 +375,52 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
       return;
     }
 
-    onAddOrder({
-      amountType: newOrder.amountType,
-      projectId: newOrder.projectId,
-      department: newOrder.department,
-      branchCompany: newOrder.branchCompany,
-      manager: newOrder.manager,
-      orderId: newOrder.orderId,
-      orderDate: newOrder.orderDate,
-      statisticalCategory: newOrder.statisticalCategory,
-      teamName: newOrder.teamName,
-      projectName: newOrder.projectName,
-      userName: newOrder.userName,
-      regionalPlatform: newOrder.regionalPlatform,
-      goodsName: newOrder.goodsName,
-      specModel: newOrder.specModel,
-      unitName: newOrder.quantityUnit,
-      quantity: `${newOrder.quantityVal} ${newOrder.quantityUnit}`,
-      netUnitPrice: parseFloat(newOrder.netUnitPrice) || 0,
-      unitPrice: parseFloat(newOrder.unitPrice) || 0,
-      netRevenue: parseFloat(newOrder.netRevenue) || 0,
-      orderValue: parseFloat(newOrder.orderValue) || 0,
-      deliveredQty: parseInt(newOrder.deliveredQty) || 0,
-      businessType: newOrder.businessType,
-      clientUnit: newOrder.clientUnit
-    });
+    onAddOrder(formToOrder(newOrder));
 
     resetNewOrder();
     setShowAddModal(false);
     setCurrentPage(1);
+  };
+
+  const openEditOrder = (order: OrderRecord) => {
+    setEditingOrder(order);
+    setNewOrder(orderToForm(order));
+    setShowAddModal(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingOrder) return;
+    if (!newOrder.projectId || !newOrder.orderId || !newOrder.goodsName || !newOrder.clientUnit) {
+      alert('请填写所有必填字段（* 标记）。');
+      return;
+    }
+    setSavingOrder(true);
+    try {
+      const updatedOrder = formToOrder(newOrder, editingOrder);
+      await onUpdateOrder(editingOrder, updatedOrder);
+      setSelectedOrder((current) => (current === editingOrder ? updatedOrder : current));
+      setEditingOrder(null);
+      resetNewOrder();
+      setShowAddModal(false);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '订单修改失败');
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
+  const handleDeleteOrder = async (order: OrderRecord) => {
+    const confirmed = window.confirm(`确定删除订单 "${order.orderId}" 吗？`);
+    if (!confirmed) return;
+    try {
+      await onDeleteOrder(order);
+      if (selectedOrder === order) {
+        setSelectedOrder(null);
+      }
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '订单删除失败');
+    }
   };
 
   const handleDownloadTemplate = () => {
@@ -295,7 +445,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
     alert(`批量导入完成：成功导入 ${importedOrders.length} 条客户订单。`);
   };
 
-  const handlePurchaseSubmit = (e: React.FormEvent) => {
+  const handlePurchaseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOrder || !newPurchase.supplier) {
       alert('请填写采购厂商。');
@@ -309,15 +459,43 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
       netCost: parseFloat(newPurchase.netCost) || 0,
       purchaseAmount: parseFloat(newPurchase.purchaseAmount) || 0,
     };
-    setOrderPurchases((prev) => ({
-      ...prev,
-      [selectedOrderKey]: [entry, ...(prev[selectedOrderKey] || [])],
-    }));
-    setNewPurchase({ supplier: '', netPurchaseUnitPrice: '', purchaseUnitPrice: '', netCost: '', purchaseAmount: '' });
-    setActiveEntryModal(null);
+
+    if (editingPurchaseId === 'backend-purchase') {
+      const updatedOrder: OrderRecord = {
+        ...selectedOrder,
+        supplierName: entry.supplier,
+        purchaseUnitPriceNoTax: entry.netPurchaseUnitPrice,
+        purchaseUnitPrice: entry.purchaseUnitPrice,
+        costNoTax: entry.netCost,
+        purchaseAmount: entry.purchaseAmount,
+      };
+      try {
+        await onUpdateOrder(selectedOrder, updatedOrder);
+        setSelectedOrder(updatedOrder);
+        closeEntryModal();
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '采购信息修改失败');
+      }
+      return;
+    }
+
+    if (editingPurchaseId) {
+      setOrderPurchases((prev) => ({
+        ...prev,
+        [selectedOrderKey]: (prev[selectedOrderKey] || []).map((item) =>
+          item.id === editingPurchaseId ? { ...entry, id: editingPurchaseId } : item,
+        ),
+      }));
+    } else {
+      setOrderPurchases((prev) => ({
+        ...prev,
+        [selectedOrderKey]: [entry, ...(prev[selectedOrderKey] || [])],
+      }));
+    }
+    closeEntryModal();
   };
 
-  const handleDeliverySubmit = (e: React.FormEvent) => {
+  const handleDeliverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOrder) return;
     const entry: OrderDeliveryEntry = {
@@ -332,22 +510,130 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
       pendingNetAmount: parseFloat(newDelivery.pendingNetAmount) || 0,
       pendingAmount: parseFloat(newDelivery.pendingAmount) || 0,
     };
+
+    if (editingDeliveryId === 'backend-delivery') {
+      const updatedOrder: OrderRecord = {
+        ...selectedOrder,
+        deliveredQty: entry.deliveredQty || 0,
+        deliveryDate: entry.deliveryDate,
+        deliveryRevenueNoTax: entry.deliveredNetRevenue,
+        deliveryValue: entry.deliveryValue,
+        deliveryCostNoTax: entry.deliveredNetCost,
+        deliveryCost: entry.deliveryCost,
+        pendingDeliveryQuantity: entry.pendingQty,
+        pendingDeliveryAmountNoTax: entry.pendingNetAmount,
+        pendingDeliveryAmount: entry.pendingAmount,
+      };
+      try {
+        await onUpdateOrder(selectedOrder, updatedOrder);
+        setSelectedOrder(updatedOrder);
+        closeEntryModal();
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '交付信息修改失败');
+      }
+      return;
+    }
+
+    if (editingDeliveryId) {
+      setOrderDeliveries((prev) => ({
+        ...prev,
+        [selectedOrderKey]: (prev[selectedOrderKey] || []).map((item) =>
+          item.id === editingDeliveryId ? { ...entry, id: editingDeliveryId } : item,
+        ),
+      }));
+    } else {
+      setOrderDeliveries((prev) => ({
+        ...prev,
+        [selectedOrderKey]: [entry, ...(prev[selectedOrderKey] || [])],
+      }));
+    }
+    closeEntryModal();
+  };
+
+  const openCreatePurchase = () => {
+    setEditingPurchaseId(null);
+    resetNewPurchase();
+    setActiveEntryModal('purchase');
+  };
+
+  const openEditPurchase = (item: OrderPurchaseEntry) => {
+    setEditingPurchaseId(item.id);
+    setNewPurchase(purchaseEntryToForm(item));
+    setActiveEntryModal('purchase');
+  };
+
+  const openCreateDelivery = () => {
+    setEditingDeliveryId(null);
+    resetNewDelivery();
+    setActiveEntryModal('delivery');
+  };
+
+  const openEditDelivery = (item: OrderDeliveryEntry) => {
+    setEditingDeliveryId(item.id);
+    setNewDelivery(deliveryEntryToForm(item));
+    setActiveEntryModal('delivery');
+  };
+
+  const handleDeletePurchase = async (item: OrderPurchaseEntry) => {
+    if (!selectedOrder) return;
+    const confirmed = window.confirm('确定删除这条采购信息吗？');
+    if (!confirmed) return;
+
+    if (item.id === 'backend-purchase') {
+      const updatedOrder: OrderRecord = {
+        ...selectedOrder,
+        supplierName: undefined,
+        purchaseUnitPriceNoTax: undefined,
+        purchaseUnitPrice: undefined,
+        costNoTax: undefined,
+        purchaseAmount: undefined,
+      };
+      try {
+        await onUpdateOrder(selectedOrder, updatedOrder);
+        setSelectedOrder(updatedOrder);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '采购信息删除失败');
+      }
+      return;
+    }
+
+    setOrderPurchases((prev) => ({
+      ...prev,
+      [selectedOrderKey]: (prev[selectedOrderKey] || []).filter((entry) => entry.id !== item.id),
+    }));
+  };
+
+  const handleDeleteDelivery = async (item: OrderDeliveryEntry) => {
+    if (!selectedOrder) return;
+    const confirmed = window.confirm('确定删除这条交付信息吗？');
+    if (!confirmed) return;
+
+    if (item.id === 'backend-delivery') {
+      const updatedOrder: OrderRecord = {
+        ...selectedOrder,
+        deliveredQty: 0,
+        deliveryDate: undefined,
+        deliveryRevenueNoTax: undefined,
+        deliveryValue: undefined,
+        deliveryCostNoTax: undefined,
+        deliveryCost: undefined,
+        pendingDeliveryQuantity: undefined,
+        pendingDeliveryAmountNoTax: undefined,
+        pendingDeliveryAmount: undefined,
+      };
+      try {
+        await onUpdateOrder(selectedOrder, updatedOrder);
+        setSelectedOrder(updatedOrder);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : '交付信息删除失败');
+      }
+      return;
+    }
+
     setOrderDeliveries((prev) => ({
       ...prev,
-      [selectedOrderKey]: [entry, ...(prev[selectedOrderKey] || [])],
+      [selectedOrderKey]: (prev[selectedOrderKey] || []).filter((entry) => entry.id !== item.id),
     }));
-    setNewDelivery({
-      deliveryDate: new Date().toISOString().split('T')[0],
-      deliveredQty: '',
-      deliveredNetRevenue: '',
-      deliveryValue: '',
-      deliveredNetCost: '',
-      deliveryCost: '',
-      pendingQty: '',
-      pendingNetAmount: '',
-      pendingAmount: '',
-    });
-    setActiveEntryModal(null);
   };
 
   return (
@@ -375,7 +661,11 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                 <input type="file" accept=".csv,text/csv" onChange={handleBatchImport} className="hidden" />
               </label>
               <button 
-                onClick={() => setShowAddModal(true)}
+                onClick={() => {
+                  setEditingOrder(null);
+                  resetNewOrder();
+                  setShowAddModal(true);
+                }}
                 className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-all text-xs font-semibold"
               >
                 <Plus className="w-4 h-4" />
@@ -418,6 +708,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
             <label className="text-xs font-medium text-slate-500">订单日期</label>
             <input 
               type="date" 
+              lang="zh-CN"
               value={orderDate}
               onChange={e => setOrderDate(e.target.value)}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
@@ -448,12 +739,24 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
             />
           </div>
 
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-slate-500">采购厂商</label>
+            <input
+              type="text"
+              placeholder="输入采购厂商"
+              value={supplierName}
+              onChange={e => setSupplierName(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
+            />
+          </div>
+
           {/* Date range selection */}
           <div className="md:col-span-2 space-y-1.5">
             <label className="text-xs font-medium text-slate-500">订单日期范围</label>
             <div className="flex items-center gap-2">
               <input 
                 type="date" 
+                lang="zh-CN"
                 value={startDate}
                 onChange={e => setStartDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
@@ -461,6 +764,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               <span className="text-slate-400 text-xs">至</span>
               <input 
                 type="date" 
+                lang="zh-CN"
                 value={endDate}
                 onChange={e => setEndDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
@@ -500,7 +804,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                 <th className="px-6 py-3.5 font-semibold text-xs text-slate-500 text-center w-[90px]">数量</th>
                 <th className="px-6 py-3.5 font-semibold text-xs text-slate-500 text-right w-[140px]">订单价值</th>
                 <th className="px-6 py-3.5 font-semibold text-xs text-slate-500 text-center w-[90px]">交付数量</th>
-                <th className="px-6 py-3.5 font-semibold text-xs text-slate-500 text-center w-[80px]">操作</th>
+                <th className="px-6 py-3.5 font-semibold text-xs text-slate-500 text-center w-[132px]">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -523,6 +827,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                     </td>
                     <td className="px-6 py-4 text-xs text-center font-mono font-semibold text-slate-800">{item.deliveredQty}</td>
                     <td className="px-6 py-4 text-center">
+                      <div className="inline-flex items-center justify-center gap-1">
                       <button
                         type="button"
                         onClick={() => setSelectedOrder(item)}
@@ -532,6 +837,17 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                       >
                         <Eye className="w-4 h-4" />
                       </button>
+                      {canEditOrders && (
+                        <button type="button" onClick={() => openEditOrder(item)} title="修改订单" aria-label={`修改订单 ${item.orderId}`} className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100 hover:border-blue-200 transition-colors">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {canDeleteOrders && (
+                        <button type="button" onClick={() => handleDeleteOrder(item)} title="删除订单" aria-label={`删除订单 ${item.orderId}`} className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:border-rose-200 transition-colors">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -664,30 +980,57 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
 
               <section>
                 <h3 className="text-sm font-bold text-slate-900 mb-3">采购信息</h3>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="w-full min-w-[720px] text-left">
+                <div className="max-w-full overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-left" style={{ minWidth: ORDER_DETAIL_TABLE_WIDTHS.purchase }}>
                     <thead className="bg-slate-50 text-xs text-slate-500">
                       <tr>
-                        <th className="px-4 py-2 font-semibold">采购厂商</th>
-                        <th className="px-4 py-2 font-semibold text-right">不含税采购单价</th>
-                        <th className="px-4 py-2 font-semibold text-right">采购单价</th>
-                        <th className="px-4 py-2 font-semibold text-right">不含税成本</th>
-                        <th className="px-4 py-2 font-semibold text-right">采购金额</th>
+                        <th className="px-4 py-2 font-semibold whitespace-nowrap">采购厂商</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">不含税采购单价</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">采购单价</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">不含税成本</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">采购金额</th>
+                        {canManageOrderRows && <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">操作</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {selectedPurchases.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="px-4 py-6 text-center text-xs text-slate-400">暂无采购信息</td>
+                          <td colSpan={canManageOrderRows ? 6 : 5} className="px-4 py-6 text-center text-xs text-slate-400">暂无采购信息</td>
                         </tr>
                       ) : (
                         selectedPurchases.map((item) => (
                           <tr key={item.id} className="text-xs text-slate-700">
-                            <td className="px-4 py-2">{item.supplier}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.netPurchaseUnitPrice)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.purchaseUnitPrice)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.netCost)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.purchaseAmount)}</td>
+                            <td className="px-4 py-2 whitespace-nowrap">{item.supplier}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.netPurchaseUnitPrice)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.purchaseUnitPrice)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.netCost)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.purchaseAmount)}</td>
+                            {canManageOrderRows && (
+                              <td className="px-4 py-2">
+                                <div className="flex items-center justify-end gap-1">
+                                  {canEditOrders && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditPurchase(item)}
+                                      title="修改采购信息"
+                                      className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  {canDeleteOrders && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeletePurchase(item)}
+                                      title="删除采购信息"
+                                      className="p-1.5 rounded-md text-red-600 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))
                       )}
@@ -698,38 +1041,65 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
 
               <section>
                 <h3 className="text-sm font-bold text-slate-900 mb-3">交付信息</h3>
-                <div className="overflow-x-auto rounded-lg border border-slate-200">
-                  <table className="w-full min-w-[980px] text-left">
+                <div className="max-w-full overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-left" style={{ minWidth: ORDER_DETAIL_TABLE_WIDTHS.delivery }}>
                     <thead className="bg-slate-50 text-xs text-slate-500">
                       <tr>
-                        <th className="px-4 py-2 font-semibold">交付日期</th>
-                        <th className="px-4 py-2 font-semibold text-right">交付数量</th>
-                        <th className="px-4 py-2 font-semibold text-right">交付不含税收入</th>
-                        <th className="px-4 py-2 font-semibold text-right">交付价值</th>
-                        <th className="px-4 py-2 font-semibold text-right">交付不含税成本</th>
-                        <th className="px-4 py-2 font-semibold text-right">交付成本</th>
-                        <th className="px-4 py-2 font-semibold text-right">待交付数量</th>
-                        <th className="px-4 py-2 font-semibold text-right">待交付金额（不含税）</th>
-                        <th className="px-4 py-2 font-semibold text-right">待交付金额</th>
+                        <th className="px-4 py-2 font-semibold whitespace-nowrap">交付日期</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">交付数量</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">交付不含税收入</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">交付价值</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">交付不含税成本</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">交付成本</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">待交付数量</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">待交付金额（不含税）</th>
+                        <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">待交付金额</th>
+                        {canManageOrderRows && <th className="px-4 py-2 font-semibold text-right whitespace-nowrap">操作</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {selectedDeliveries.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="px-4 py-6 text-center text-xs text-slate-400">暂无交付信息</td>
+                          <td colSpan={canManageOrderRows ? 10 : 9} className="px-4 py-6 text-center text-xs text-slate-400">暂无交付信息</td>
                         </tr>
                       ) : (
                         selectedDeliveries.map((item) => (
                           <tr key={item.id} className="text-xs text-slate-700">
-                            <td className="px-4 py-2">{item.deliveryDate}</td>
-                            <td className="px-4 py-2 text-right font-mono">{blank(item.deliveredQty)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveredNetRevenue)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveryValue)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveredNetCost)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.deliveryCost)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{blank(item.pendingQty)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.pendingNetAmount)}</td>
-                            <td className="px-4 py-2 text-right font-mono">{formatOptionalMoney(item.pendingAmount)}</td>
+                            <td className="px-4 py-2 whitespace-nowrap">{item.deliveryDate}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{blank(item.deliveredQty)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.deliveredNetRevenue)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.deliveryValue)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.deliveredNetCost)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.deliveryCost)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{blank(item.pendingQty)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.pendingNetAmount)}</td>
+                            <td className="px-4 py-2 text-right font-mono whitespace-nowrap">{formatOptionalMoney(item.pendingAmount)}</td>
+                            {canManageOrderRows && (
+                              <td className="px-4 py-2">
+                                <div className="flex items-center justify-end gap-1">
+                                  {canEditOrders && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditDelivery(item)}
+                                      title="修改交付信息"
+                                      className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                  {canDeleteOrders && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteDelivery(item)}
+                                      title="删除交付信息"
+                                      className="p-1.5 rounded-md text-red-600 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))
                       )}
@@ -741,14 +1111,14 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               {canEnterOrders && <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setActiveEntryModal('purchase')}
+                  onClick={openCreatePurchase}
                   className="px-4 py-2 border border-blue-200 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold"
                 >
                   录入采购信息
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveEntryModal('delivery')}
+                  onClick={openCreateDelivery}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold"
                 >
                   录入交付信息
@@ -763,8 +1133,8 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 p-4">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <h2 className="text-sm font-bold text-slate-900">录入采购信息</h2>
-              <button type="button" onClick={() => setActiveEntryModal(null)} className="text-slate-400 hover:text-slate-600 text-lg font-semibold">
+              <h2 className="text-sm font-bold text-slate-900">{editingPurchaseId ? '修改采购信息' : '录入采购信息'}</h2>
+              <button type="button" onClick={closeEntryModal} className="text-slate-400 hover:text-slate-600 text-lg font-semibold">
                 &times;
               </button>
             </div>
@@ -792,8 +1162,8 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setActiveEntryModal(null)} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">保存采购信息</button>
+                <button type="button" onClick={closeEntryModal} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">{editingPurchaseId ? '保存修改' : '保存采购信息'}</button>
               </div>
             </form>
           </div>
@@ -804,8 +1174,8 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 p-4">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <h2 className="text-sm font-bold text-slate-900">录入交付信息</h2>
-              <button type="button" onClick={() => setActiveEntryModal(null)} className="text-slate-400 hover:text-slate-600 text-lg font-semibold">
+              <h2 className="text-sm font-bold text-slate-900">{editingDeliveryId ? '修改交付信息' : '录入交付信息'}</h2>
+              <button type="button" onClick={closeEntryModal} className="text-slate-400 hover:text-slate-600 text-lg font-semibold">
                 &times;
               </button>
             </div>
@@ -813,7 +1183,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-600">交付日期</label>
-                  <input type="date" value={newDelivery.deliveryDate} onChange={e => setNewDelivery({...newDelivery, deliveryDate: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
+                  <input type="date" lang="zh-CN" value={newDelivery.deliveryDate} onChange={e => setNewDelivery({...newDelivery, deliveryDate: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" />
                 </div>
                 {[
                   ['交付数量', 'deliveredQty'],
@@ -837,8 +1207,8 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                 ))}
               </div>
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setActiveEntryModal(null)} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">保存交付信息</button>
+                <button type="button" onClick={closeEntryModal} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold">{editingDeliveryId ? '保存修改' : '保存交付信息'}</button>
               </div>
             </form>
           </div>
@@ -852,17 +1222,21 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                 <ShoppingBag className="w-4 h-4 text-blue-600" />
-                <span>新增客户订单</span>
+                <span>{editingOrder ? '修改客户订单' : '新增客户订单'}</span>
               </h2>
               <button 
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false);
+                  setEditingOrder(null);
+                  resetNewOrder();
+                }}
                 className="text-slate-400 hover:text-slate-600 text-lg font-semibold"
               >
                 &times;
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[calc(88vh-73px)]">
+            <form onSubmit={editingOrder ? handleEditSubmit : handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[calc(88vh-73px)]">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-600">全额/净额</label>
@@ -937,6 +1311,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                   <label className="text-xs font-semibold text-slate-600">订单日期 *</label>
                   <input 
                     type="date" 
+                    lang="zh-CN"
                     required
                     value={newOrder.orderDate}
                     onChange={e => setNewOrder({...newOrder, orderDate: e.target.value})}
@@ -1128,7 +1503,11 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button 
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setEditingOrder(null);
+                    resetNewOrder();
+                  }}
                   className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium"
                 >
                   取消
@@ -1137,7 +1516,7 @@ export default function OrdersScreen({ orders, onAddOrder, canEnterOrders }: Ord
                   type="submit"
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold"
                 >
-                  确认保存
+                  {savingOrder ? '保存中...' : '确认保存'}
                 </button>
               </div>
             </form>

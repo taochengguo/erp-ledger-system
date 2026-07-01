@@ -18,10 +18,21 @@ from .config import settings
 from .db import db
 
 Permission = str
-ALL_PERMISSIONS = {"order_entry", "purchase_entry", "sales_entry", "system_admin"}
+ALL_PERMISSIONS = {
+    "order_entry",
+    "order_edit",
+    "order_delete",
+    "purchase_entry",
+    "purchase_edit",
+    "purchase_delete",
+    "sales_entry",
+    "sales_edit",
+    "sales_delete",
+    "system_admin",
+}
 
 ROLE_PERMISSIONS: dict[str, set[Permission]] = {
-    "admin": {"order_entry", "purchase_entry", "sales_entry", "system_admin"},
+    "admin": set(ALL_PERMISSIONS),
     "order_entry": {"order_entry"},
     "purchase_entry": {"purchase_entry"},
     "sales_entry": {"sales_entry"},

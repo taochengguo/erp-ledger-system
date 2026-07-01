@@ -16,6 +16,16 @@ def _requires_login(path: str) -> bool:
     return any(dependency.call is get_current_user for dependency in route.dependant.dependencies)
 
 
+def _route_methods(path: str) -> set[str]:
+    methods: set[str] = set()
+    for route in app.routes:
+        if isinstance(route, APIRoute) and route.path == path:
+            methods.update(route.methods or set())
+    if not methods:
+        raise AssertionError(f"Route not found: {path}")
+    return methods
+
+
 def test_business_api_requires_login_dependency():
     protected_paths = [
         "/api/dashboard/summary",
@@ -33,3 +43,19 @@ def test_business_api_requires_login_dependency():
 
 def test_health_remains_public():
     assert not _requires_login("/api/health")
+
+
+def test_edit_and_delete_routes_exist():
+    expected_routes = {
+        "/api/orders/{order_line_id}": {"PUT", "DELETE"},
+        "/api/purchases/contracts/{contract_id}": {"PUT", "DELETE"},
+        "/api/purchases/invoices/{invoice_id}": {"PUT", "DELETE"},
+        "/api/purchases/payments/{payment_id}": {"PUT", "DELETE"},
+        "/api/sales/contracts/{contract_id}": {"PUT", "DELETE"},
+        "/api/sales/invoices/{invoice_id}": {"PUT", "DELETE"},
+        "/api/sales/receipts/{receipt_id}": {"PUT", "DELETE"},
+        "/api/auth/users/{user_id}": {"PUT", "DELETE"},
+    }
+
+    for path, methods in expected_routes.items():
+        assert methods <= _route_methods(path)

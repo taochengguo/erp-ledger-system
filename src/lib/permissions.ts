@@ -1,4 +1,14 @@
-export type Permission = 'order_entry' | 'purchase_entry' | 'sales_entry' | 'system_admin';
+export type Permission =
+  | 'order_entry'
+  | 'order_edit'
+  | 'order_delete'
+  | 'purchase_entry'
+  | 'purchase_edit'
+  | 'purchase_delete'
+  | 'sales_entry'
+  | 'sales_edit'
+  | 'sales_delete'
+  | 'system_admin';
 
 export type RoleCode = 'admin' | 'order_entry' | 'purchase_entry' | 'sales_entry' | 'viewer';
 
@@ -15,12 +25,36 @@ export interface AuthUser {
 }
 
 export const ROLE_PERMISSIONS: Record<RoleCode, Permission[]> = {
-  admin: ['order_entry', 'purchase_entry', 'sales_entry', 'system_admin'],
+  admin: [
+    'order_entry',
+    'order_edit',
+    'order_delete',
+    'purchase_entry',
+    'purchase_edit',
+    'purchase_delete',
+    'sales_entry',
+    'sales_edit',
+    'sales_delete',
+    'system_admin',
+  ],
   order_entry: ['order_entry'],
   purchase_entry: ['purchase_entry'],
   sales_entry: ['sales_entry'],
   viewer: [],
 };
+
+export const SYSTEM_PERMISSION_OPTIONS: Array<{ value: Permission; label: string }> = [
+  { value: 'order_entry', label: '订单详情录入' },
+  { value: 'order_edit', label: '订单详情修改' },
+  { value: 'order_delete', label: '订单详情删除' },
+  { value: 'purchase_entry', label: '采购详情录入' },
+  { value: 'purchase_edit', label: '采购详情修改' },
+  { value: 'purchase_delete', label: '采购详情删除' },
+  { value: 'sales_entry', label: '销售详情录入' },
+  { value: 'sales_edit', label: '销售详情修改' },
+  { value: 'sales_delete', label: '销售详情删除' },
+  { value: 'system_admin', label: '系统权限' },
+];
 
 export const ROLE_LABELS: Record<RoleCode, string> = {
   admin: '管理员',

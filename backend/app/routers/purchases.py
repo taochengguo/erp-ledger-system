@@ -38,6 +38,9 @@ def list_purchases(
     order_id: str | None = None,
     manager: str | None = None,
     department: str | None = None,
+    supplier_name: str | None = None,
+    contract_no: str | None = None,
+    payment_date: str | None = None,
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user: CurrentUser = Depends(get_current_user),
@@ -56,17 +59,36 @@ def list_purchases(
     if department:
         conditions.append("department = :department")
         params["department"] = department
+    if supplier_name:
+        conditions.append("supplier_name LIKE :supplier_name")
+        params["supplier_name"] = f"%{supplier_name}%"
+    if contract_no:
+        conditions.append("purchase_contract_no LIKE :contract_no")
+        params["contract_no"] = f"%{contract_no}%"
+    if payment_date:
+        conditions.append("latest_payment_date = :payment_date")
+        params["payment_date"] = payment_date
     apply_department_scope(conditions, params, user)
     where_sql = " AND ".join(conditions)
+    source_sql = """
+        SELECT v.*,
+               (
+                 SELECT MAX(pp.payment_date)
+                 FROM purchase_payment pp
+                 WHERE pp.order_line_id = v.order_line_id
+                   AND pp.deleted_at IS NULL
+               ) AS latest_payment_date
+        FROM v_order_line_finance v
+    """
     with db() as conn:
-        total = conn.execute(text(f"SELECT COUNT(*) FROM v_order_line_finance WHERE {where_sql}"), params).scalar()
+        total = conn.execute(text(f"SELECT COUNT(*) FROM ({source_sql}) purchase_detail WHERE {where_sql}"), params).scalar()
         rows = conn.execute(
             text(
                 f"""
                 SELECT order_line_id, project_code, order_no, account_manager, department, supplier_name,
                        purchase_contract_no, purchase_contract_signed_amount,
-                       purchase_amount, total_paid, accounts_payable
-                FROM v_order_line_finance
+                       purchase_amount, total_paid, accounts_payable, latest_payment_date
+                FROM ({source_sql}) purchase_detail
                 WHERE {where_sql}
                 ORDER BY order_date DESC, project_code
                 LIMIT :limit OFFSET :offset
@@ -170,6 +192,41 @@ def add_purchase_contract(
     return get_purchase_detail(order_line_id, user)
 
 
+@router.put("/contracts/{contract_id}")
+def update_purchase_contract(
+    contract_id: int,
+    payload: PurchaseContractCreate,
+    user: CurrentUser = Depends(require_permission("purchase_edit")),
+) -> dict:
+    order_line_id = _ensure_detail_record("purchase_contract", contract_id, user, require_entry=True)
+    with db() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE purchase_contract
+                SET purchase_contract_no = :purchase_contract_no,
+                    payment_terms = :payment_terms,
+                    performance_period = :performance_period,
+                    signed_amount = :signed_amount,
+                    unsigned_amount = :unsigned_amount
+                WHERE id = :contract_id
+                """
+            ),
+            {"contract_id": contract_id, **_payload_dict(payload)},
+        )
+    return get_purchase_detail(order_line_id, user)
+
+
+@router.delete("/contracts/{contract_id}")
+def delete_purchase_contract(
+    contract_id: int,
+    user: CurrentUser = Depends(require_permission("purchase_delete")),
+) -> dict:
+    order_line_id = _ensure_detail_record("purchase_contract", contract_id, user, require_entry=True)
+    _soft_delete_detail("purchase_contract", contract_id)
+    return get_purchase_detail(order_line_id, user)
+
+
 @router.post("/{order_line_id}/invoices")
 def add_purchase_invoice(
     order_line_id: int,
@@ -192,6 +249,41 @@ def add_purchase_invoice(
             ),
             {"order_line_id": order_line_id, "phase_no": phase_no, **_payload_dict(payload)},
         )
+    return get_purchase_detail(order_line_id, user)
+
+
+@router.put("/invoices/{invoice_id}")
+def update_purchase_invoice(
+    invoice_id: int,
+    payload: PurchaseInvoiceCreate,
+    user: CurrentUser = Depends(require_permission("purchase_edit")),
+) -> dict:
+    order_line_id = _ensure_detail_record("purchase_invoice", invoice_id, user, require_entry=True)
+    with db() as conn:
+        data = _payload_dict(payload)
+        conn.execute(
+            text(
+                """
+                UPDATE purchase_invoice
+                SET received_invoice_date = :received_invoice_date,
+                    received_invoice_date_text = :received_invoice_date,
+                    invoice_no = :invoice_no,
+                    invoice_amount = :invoice_amount
+                WHERE id = :invoice_id
+                """
+            ),
+            {"invoice_id": invoice_id, **data},
+        )
+    return get_purchase_detail(order_line_id, user)
+
+
+@router.delete("/invoices/{invoice_id}")
+def delete_purchase_invoice(
+    invoice_id: int,
+    user: CurrentUser = Depends(require_permission("purchase_delete")),
+) -> dict:
+    order_line_id = _ensure_detail_record("purchase_invoice", invoice_id, user, require_entry=True)
+    _soft_delete_detail("purchase_invoice", invoice_id)
     return get_purchase_detail(order_line_id, user)
 
 
@@ -223,6 +315,42 @@ def add_purchase_payment(
     return get_purchase_detail(order_line_id, user)
 
 
+@router.put("/payments/{payment_id}")
+def update_purchase_payment(
+    payment_id: int,
+    payload: PurchasePaymentCreate,
+    user: CurrentUser = Depends(require_permission("purchase_edit")),
+) -> dict:
+    order_line_id = _ensure_detail_record("purchase_payment", payment_id, user, require_entry=True)
+    with db() as conn:
+        data = _payload_dict(payload)
+        conn.execute(
+            text(
+                """
+                UPDATE purchase_payment
+                SET due_payment_date = :due_payment_date,
+                    payment_date = :payment_date,
+                    payment_date_text = :payment_date,
+                    payment_voucher_no = :payment_voucher_no,
+                    payment_amount = :payment_amount
+                WHERE id = :payment_id
+                """
+            ),
+            {"payment_id": payment_id, **data},
+        )
+    return get_purchase_detail(order_line_id, user)
+
+
+@router.delete("/payments/{payment_id}")
+def delete_purchase_payment(
+    payment_id: int,
+    user: CurrentUser = Depends(require_permission("purchase_delete")),
+) -> dict:
+    order_line_id = _ensure_detail_record("purchase_payment", payment_id, user, require_entry=True)
+    _soft_delete_detail("purchase_payment", payment_id)
+    return get_purchase_detail(order_line_id, user)
+
+
 def _ensure_order_line(order_line_id: int, user: CurrentUser, require_entry: bool = False) -> None:
     with db() as conn:
         row = conn.execute(
@@ -245,6 +373,31 @@ def _payload_dict(payload: BaseModel) -> dict:
     if hasattr(payload, "model_dump"):
         return payload.model_dump()
     return payload.dict()
+
+
+def _ensure_detail_record(table_name: str, record_id: int, user: CurrentUser, require_entry: bool = False) -> int:
+    with db() as conn:
+        row = conn.execute(
+            text(
+                f"""
+                SELECT item.order_line_id, v.department
+                FROM {table_name} item
+                JOIN v_order_line_finance v ON v.order_line_id = item.order_line_id
+                WHERE item.id = :record_id AND item.deleted_at IS NULL
+                """
+            ),
+            {"record_id": record_id},
+        ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Purchase record not found")
+    if not can_access_department(user, str(row["department"]) if row["department"] is not None else None, require_entry):
+        raise HTTPException(status_code=403, detail="Department permission denied")
+    return int(row["order_line_id"])
+
+
+def _soft_delete_detail(table_name: str, record_id: int) -> None:
+    with db() as conn:
+        conn.execute(text(f"UPDATE {table_name} SET deleted_at = CURRENT_TIMESTAMP WHERE id = :record_id"), {"record_id": record_id})
 
 
 def _next_phase(conn, table_name: str, order_line_id: int) -> int:

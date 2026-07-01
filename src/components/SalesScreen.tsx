@@ -9,19 +9,24 @@ import {
   FileText,
   ReceiptText,
   Banknote,
+  Pencil,
+  Trash2,
   X,
 } from 'lucide-react';
 import { api, BackendSalesDetail } from '../api';
 import { SalesRecord } from '../types';
 import { buildSalesInvoiceDraft, getNextReceiptPhase } from '../lib/salesDetailModel';
-import { applySalesFilters, emptySalesFilters, submitQueryFilters } from '../lib/queryFilterModel';
+import { applySalesFilters, emptySalesFilters, getDepartmentOptions, submitQueryFilters } from '../lib/queryFilterModel';
 
 interface SalesScreenProps {
   sales: SalesRecord[];
   canEnterSales: boolean;
+  canEditSales: boolean;
+  canDeleteSales: boolean;
 }
 
 type EntryMode = 'contract' | 'invoice' | 'receipt';
+type EditingRecord = { mode: EntryMode; id: number } | null;
 
 const moneyFormatter = new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2 });
 
@@ -51,11 +56,15 @@ function formatRatio(value?: number | null) {
   return `${moneyFormatter.format(percent)}%`;
 }
 
-export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) {
+export default function SalesScreen({ sales, canEnterSales, canEditSales, canDeleteSales }: SalesScreenProps) {
   const [projectId, setProjectId] = useState('');
   const [orderId, setOrderId] = useState('');
   const [manager, setManager] = useState('');
   const [department, setDepartment] = useState('');
+  const [supplier, setSupplier] = useState('');
+  const [contractNo, setContractNo] = useState('');
+  const [receiptStartDate, setReceiptStartDate] = useState('');
+  const [receiptEndDate, setReceiptEndDate] = useState('');
   const [submittedFilters, setSubmittedFilters] = useState(emptySalesFilters);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedSale, setSelectedSale] = useState<SalesRecord | null>(null);
@@ -63,6 +72,7 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [entryMode, setEntryMode] = useState<EntryMode | null>(null);
+  const [editingRecord, setEditingRecord] = useState<EditingRecord>(null);
   const [saving, setSaving] = useState(false);
   const [contractForm, setContractForm] = useState({
     contract_signed_date: '',
@@ -102,12 +112,17 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
   const nextReceiptPhase = getNextReceiptPhase(detail?.receipts || []);
   const summary = detail?.summary;
   const activeOrderLineId = selectedSale?.orderLineId || Number(summary?.primary_order_line_id || 0);
+  const departmentOptions = useMemo(() => getDepartmentOptions(sales), [sales]);
 
   const handleReset = () => {
     setProjectId('');
     setOrderId('');
     setManager('');
     setDepartment('');
+    setSupplier('');
+    setContractNo('');
+    setReceiptStartDate('');
+    setReceiptEndDate('');
     setSubmittedFilters(emptySalesFilters);
     setCurrentPage(1);
   };
@@ -119,6 +134,10 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
         orderId,
         manager,
         department,
+        supplier,
+        contractNo,
+        receiptStartDate,
+        receiptEndDate,
       }),
     );
     setCurrentPage(1);
@@ -128,6 +147,7 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
     setSelectedSale(item);
     setDetail(null);
     setEntryMode(null);
+    setEditingRecord(null);
     setDetailError('');
     setDetailLoading(true);
     try {
@@ -146,6 +166,7 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
     setSelectedSale(null);
     setDetail(null);
     setEntryMode(null);
+    setEditingRecord(null);
     setDetailError('');
   };
 
@@ -156,6 +177,7 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
   };
 
   const openEntry = (mode: EntryMode) => {
+    setEditingRecord(null);
     setEntryMode(mode);
     if (mode === 'contract' && selectedSale) {
       setContractForm({
@@ -171,6 +193,58 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
     }
   };
 
+  const openEditEntry = (mode: EntryMode, item: BackendSalesDetail['contracts'][number] | BackendSalesDetail['invoices'][number] | BackendSalesDetail['receipts'][number]) => {
+    setEditingRecord({ mode, id: item.id });
+    setEntryMode(mode);
+    if (mode === 'contract') {
+      const contract = item as BackendSalesDetail['contracts'][number];
+      setContractForm({
+        contract_signed_date: contract.contract_signed_date || '',
+        sales_contract_no: contract.sales_contract_no || '',
+        contract_value: contract.contract_value === null || contract.contract_value === undefined ? '' : String(contract.contract_value),
+        performance_period: contract.performance_period || '',
+        unsigned_contract_amount: contract.unsigned_contract_amount === null || contract.unsigned_contract_amount === undefined ? '' : String(contract.unsigned_contract_amount),
+      });
+    } else if (mode === 'invoice') {
+      const invoice = item as BackendSalesDetail['invoices'][number];
+      setInvoiceForm({
+        invoice_doc_no: invoice.invoice_doc_no || '',
+        invoice_date: invoice.invoice_date || '',
+        invoice_no: invoice.invoice_no || '',
+        invoice_amount: invoice.invoice_amount === null || invoice.invoice_amount === undefined ? '' : String(invoice.invoice_amount),
+        pending_invoice_amount: invoice.pending_invoice_amount === null || invoice.pending_invoice_amount === undefined ? '' : String(invoice.pending_invoice_amount),
+        delivered_not_invoiced_amount: invoice.delivered_not_invoiced_amount === null || invoice.delivered_not_invoiced_amount === undefined ? '' : String(invoice.delivered_not_invoiced_amount),
+      });
+    } else {
+      const receipt = item as BackendSalesDetail['receipts'][number];
+      setReceiptForm({
+        receipt_date: receipt.receipt_date || '',
+        payment_notice_no: receipt.payment_notice_no || '',
+        receipt_amount: receipt.receipt_amount === null || receipt.receipt_amount === undefined ? '' : String(receipt.receipt_amount),
+        receipt_ratio: receipt.receipt_ratio === null || receipt.receipt_ratio === undefined ? '' : String(receipt.receipt_ratio),
+      });
+    }
+  };
+
+  const handleDeleteEntry = async (mode: EntryMode, id: number) => {
+    const confirmed = window.confirm('确定删除这条销售信息吗？');
+    if (!confirmed) return;
+    setSaving(true);
+    setDetailError('');
+    try {
+      const updated = mode === 'contract'
+        ? await api.deleteSalesContract(id)
+        : mode === 'invoice'
+          ? await api.deleteSalesInvoice(id)
+          : await api.deleteSalesReceipt(id);
+      setDetail(updated);
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : '删除失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleEntrySubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!activeOrderLineId || !entryMode) return;
@@ -179,32 +253,42 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
     try {
       let updated: BackendSalesDetail;
       if (entryMode === 'contract') {
-        updated = await api.addSalesContract(activeOrderLineId, {
+        const data = {
           contract_signed_date: contractForm.contract_signed_date || null,
           sales_contract_no: contractForm.sales_contract_no || null,
           contract_value: parseAmount(contractForm.contract_value),
           performance_period: contractForm.performance_period || null,
           unsigned_contract_amount: parseAmount(contractForm.unsigned_contract_amount),
-        });
+        };
+        updated = editingRecord
+          ? await api.updateSalesContract(editingRecord.id, data)
+          : await api.addSalesContract(activeOrderLineId, data);
       } else if (entryMode === 'invoice') {
-        updated = await api.addSalesInvoice(activeOrderLineId, {
+        const data = {
           invoice_doc_no: invoiceForm.invoice_doc_no || null,
           invoice_date: invoiceForm.invoice_date || null,
           invoice_no: invoiceForm.invoice_no || null,
           invoice_amount: parseAmount(invoiceForm.invoice_amount),
           pending_invoice_amount: parseAmount(invoiceForm.pending_invoice_amount),
           delivered_not_invoiced_amount: parseAmount(invoiceForm.delivered_not_invoiced_amount),
-        });
+        };
+        updated = editingRecord
+          ? await api.updateSalesInvoice(editingRecord.id, data)
+          : await api.addSalesInvoice(activeOrderLineId, data);
       } else {
-        updated = await api.addSalesReceipt(activeOrderLineId, {
+        const data = {
           receipt_date: receiptForm.receipt_date || null,
           payment_notice_no: receiptForm.payment_notice_no || null,
           receipt_amount: parseAmount(receiptForm.receipt_amount),
           receipt_ratio: parseAmount(receiptForm.receipt_ratio),
-        });
+        };
+        updated = editingRecord
+          ? await api.updateSalesReceipt(editingRecord.id, data)
+          : await api.addSalesReceipt(activeOrderLineId, data);
       }
       setDetail(updated);
       setEntryMode(null);
+      setEditingRecord(null);
       resetEntryForms();
     } catch (error) {
       setDetailError(error instanceof Error ? error.message : '保存失败');
@@ -227,13 +311,37 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
           <FilterInput label="项目编号" placeholder="输入项目编号" value={projectId} onChange={setProjectId} />
           <FilterInput label="订单号" placeholder="输入订单号" value={orderId} onChange={setOrderId} />
           <FilterInput label="客户经理" placeholder="请输入客户经理姓名" value={manager} onChange={setManager} />
+          <FilterInput label="采购厂家" placeholder="输入采购厂家" value={supplier} onChange={setSupplier} />
+          <FilterInput label="公司合同号" placeholder="输入公司合同号" value={contractNo} onChange={setContractNo} />
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-xs font-medium text-slate-500">回款时间</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                lang="zh-CN"
+                value={receiptStartDate}
+                onChange={(e) => setReceiptStartDate(e.target.value)}
+                className="min-w-0 w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
+              />
+              <span className="shrink-0 text-xs text-slate-400">至</span>
+              <input
+                type="date"
+                lang="zh-CN"
+                value={receiptEndDate}
+                onChange={(e) => setReceiptEndDate(e.target.value)}
+                className="min-w-0 w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
+              />
+            </div>
+          </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-slate-500">部门</label>
             <select value={department} onChange={(e) => setDepartment(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-white text-xs text-slate-700">
               <option value="">全部部门</option>
-              <option value="IT基础设施部">IT基础设施部</option>
-              <option value="安防事业部">安防事业部</option>
-              <option value="数据研发中心">数据研发中心</option>
+              {departmentOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -382,7 +490,14 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
                         ['合同价值', formatMoney(item.contract_value)],
                         ['履行期限', item.performance_period],
                         ['待签合同金额', formatMoney(item.unsigned_contract_amount)],
-                      ]} />
+                      ]} actions={
+                        <RecordActions
+                          canEdit={canEditSales}
+                          canDelete={canDeleteSales}
+                          onEdit={() => openEditEntry('contract', item)}
+                          onDelete={() => handleDeleteEntry('contract', item.id)}
+                        />
+                      } />
                     ))}
                   </DataBlock>
 
@@ -396,7 +511,14 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
                         ['发票金额', formatMoney(item.invoice_amount)],
                         ['待开发票金额', formatMoney(item.pending_invoice_amount)],
                         ['已交付未开票', formatMoney(item.delivered_not_invoiced_amount)],
-                      ]} />
+                      ]} actions={
+                        <RecordActions
+                          canEdit={canEditSales}
+                          canDelete={canDeleteSales}
+                          onEdit={() => openEditEntry('invoice', item)}
+                          onDelete={() => handleDeleteEntry('invoice', item.id)}
+                        />
+                      } />
                     ))}
                   </DataBlock>
 
@@ -408,7 +530,14 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
                         ['缴款单号', item.payment_notice_no],
                         ['回款金额', formatMoney(item.receipt_amount)],
                         ['回款占比', formatRatio(item.receipt_ratio)],
-                      ]} />
+                      ]} actions={
+                        <RecordActions
+                          canEdit={canEditSales}
+                          canDelete={canDeleteSales}
+                          onEdit={() => openEditEntry('receipt', item)}
+                          onDelete={() => handleDeleteEntry('receipt', item.id)}
+                        />
+                      } />
                     ))}
                   </DataBlock>
 
@@ -426,8 +555,8 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
             <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 p-4">
               <form onSubmit={handleEntrySubmit} className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden">
                 <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-                  <h3 className="text-sm font-bold text-slate-900">{entryMode === 'contract' ? '录入销售合同' : entryMode === 'invoice' ? '录入开票情况' : `录入回款情况（第 ${nextReceiptPhase} 期）`}</h3>
-                  <button type="button" onClick={() => setEntryMode(null)} className="p-1 text-slate-400 hover:text-slate-700">
+                  <h3 className="text-sm font-bold text-slate-900">{editingRecord ? '修改销售信息' : entryMode === 'contract' ? '录入销售合同' : entryMode === 'invoice' ? '录入开票情况' : `录入回款情况（第 ${nextReceiptPhase} 期）`}</h3>
+                  <button type="button" onClick={() => { setEntryMode(null); setEditingRecord(null); }} className="p-1 text-slate-400 hover:text-slate-700">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -461,7 +590,7 @@ export default function SalesScreen({ sales, canEnterSales }: SalesScreenProps) 
                   )}
                 </div>
                 <div className="px-5 py-4 border-t border-slate-100 flex justify-end gap-2">
-                  <button type="button" onClick={() => setEntryMode(null)} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
+                  <button type="button" onClick={() => { setEntryMode(null); setEditingRecord(null); }} className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-medium">取消</button>
                   <button type="submit" disabled={saving} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold disabled:opacity-50">{saving ? '保存中...' : '保存'}</button>
                 </div>
               </form>
@@ -510,24 +639,51 @@ function DataBlock({ title, emptyText, children }: { title: string; emptyText: s
       {childArray.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-200 px-4 py-5 text-center text-xs text-slate-400">{emptyText}</div>
       ) : (
-        <div className="space-y-2">{childArray}</div>
+        <div className="overflow-x-auto pb-2">
+          <div className="space-y-2 min-w-max">{childArray}</div>
+        </div>
       )}
     </section>
   );
 }
 
-const RecordRow: React.FC<{ values: Array<[string, unknown]> }> = ({ values }) => {
+const RecordRow: React.FC<{ values: Array<[string, unknown]>; actions?: React.ReactNode }> = ({ values, actions }) => {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 rounded-lg border border-slate-200 px-3 py-3">
+    <div
+      className="grid gap-3 rounded-lg border border-slate-200 px-3 py-3"
+      style={{
+        gridTemplateColumns: `repeat(${values.length}, minmax(180px, 1fr)) ${actions ? '72px' : ''}`,
+        minWidth: `${values.length * 180 + (actions ? 72 : 0) + values.length * 12}px`,
+      }}
+    >
       {values.map(([label, value]) => (
-        <div key={label}>
+        <div key={label} className="min-w-0">
           <p className="text-[11px] text-slate-400">{label}</p>
-          <p className="mt-1 text-xs font-medium text-slate-700 break-words">{textValue(value)}</p>
+          <p className="mt-1 text-xs font-medium text-slate-700 whitespace-nowrap">{textValue(value)}</p>
         </div>
       ))}
+      {actions && <div className="flex items-center justify-end gap-1">{actions}</div>}
     </div>
   );
 };
+
+function RecordActions({ canEdit, canDelete, onEdit, onDelete }: { canEdit: boolean; canDelete: boolean; onEdit: () => void; onDelete: () => void }) {
+  if (!canEdit && !canDelete) return null;
+  return (
+    <>
+      {canEdit && (
+        <button type="button" onClick={onEdit} title="修改" className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100">
+          <Pencil className="w-4 h-4" />
+        </button>
+      )}
+      {canDelete && (
+        <button type="button" onClick={onDelete} title="删除" className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-rose-100 bg-rose-50 text-rose-600 hover:bg-rose-100">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      )}
+    </>
+  );
+}
 
 function EntryButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
@@ -542,7 +698,7 @@ function FormInput({ label, value, onChange, type = 'text', className = '' }: { 
   return (
     <label className={`space-y-1 ${className}`}>
       <span className="block text-xs font-semibold text-slate-600">{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
+      <input type={type} lang={type === 'date' ? 'zh-CN' : undefined} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
     </label>
   );
 }

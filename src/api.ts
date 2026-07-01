@@ -53,6 +53,7 @@ export interface BackendProjectLedger {
 }
 
 export interface BackendOrderRecord {
+  order_line_id?: number;
   amount_type?: string | null;
   project_code: string;
   project_name?: string | null;
@@ -103,6 +104,7 @@ export interface BackendPurchaseRecord {
   purchase_amount: number | null;
   total_paid: number | null;
   accounts_payable: number | null;
+  latest_payment_date?: string | null;
 }
 
 export interface BackendPurchaseContract {
@@ -152,6 +154,8 @@ export interface BackendSalesRecord {
   sales_invoice_amount: number | null;
   total_received: number | null;
   accounts_receivable: number | null;
+  supplier_name?: string | null;
+  latest_receipt_date?: string | null;
 }
 
 export interface BackendSalesContract {
@@ -308,6 +312,16 @@ export const api = {
     department_can_entry: boolean;
   }) =>
     request<{ items: BackendUserRecord[] }>('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUserPermissions: (
+    userId: number,
+    data: {
+      role_code: string;
+      permissions: string[];
+      department_scope: string[];
+      department_can_view: boolean;
+      department_can_entry: boolean;
+    },
+  ) => request<{ items: BackendUserRecord[] }>(`/auth/users/${userId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteUser: (userId: number) => request<{ items: BackendUserRecord[] }>(`/auth/users/${userId}`, { method: 'DELETE' }),
   health: () => request<BackendHealth>('/health'),
   importExcel: () => request<{ success_rows: number; failed_rows: number }>('/import/excel', { method: 'POST' }),
@@ -316,15 +330,30 @@ export const api = {
     request<PageResult<BackendProjectLedger>>(`/ledgers${query(params)}`),
   orders: (params: Record<string, string | number | undefined> = {}) =>
     request<PageResult<BackendOrderRecord>>(`/orders${query(params)}`),
+  updateOrder: (orderLineId: number, data: Record<string, string | number | null>) =>
+    request<BackendOrderRecord>(`/orders/${orderLineId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteOrder: (orderLineId: number) => request<{ deleted: boolean; order_line_id: number }>(`/orders/${orderLineId}`, { method: 'DELETE' }),
   purchases: (params: Record<string, string | number | undefined> = {}) =>
     request<PageResult<BackendPurchaseRecord>>(`/purchases${query(params)}`),
   purchaseDetail: (orderLineId: number) => request<BackendPurchaseDetail>(`/purchases/${orderLineId}`),
   addPurchaseContract: (orderLineId: number, data: Record<string, string | number | null>) =>
     request<BackendPurchaseDetail>(`/purchases/${orderLineId}/contracts`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePurchaseContract: (contractId: number, data: Record<string, string | number | null>) =>
+    request<BackendPurchaseDetail>(`/purchases/contracts/${contractId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePurchaseContract: (contractId: number) =>
+    request<BackendPurchaseDetail>(`/purchases/contracts/${contractId}`, { method: 'DELETE' }),
   addPurchaseInvoice: (orderLineId: number, data: Record<string, string | number | null>) =>
     request<BackendPurchaseDetail>(`/purchases/${orderLineId}/invoices`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePurchaseInvoice: (invoiceId: number, data: Record<string, string | number | null>) =>
+    request<BackendPurchaseDetail>(`/purchases/invoices/${invoiceId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePurchaseInvoice: (invoiceId: number) =>
+    request<BackendPurchaseDetail>(`/purchases/invoices/${invoiceId}`, { method: 'DELETE' }),
   addPurchasePayment: (orderLineId: number, data: Record<string, string | number | null>) =>
     request<BackendPurchaseDetail>(`/purchases/${orderLineId}/payments`, { method: 'POST', body: JSON.stringify(data) }),
+  updatePurchasePayment: (paymentId: number, data: Record<string, string | number | null>) =>
+    request<BackendPurchaseDetail>(`/purchases/payments/${paymentId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePurchasePayment: (paymentId: number) =>
+    request<BackendPurchaseDetail>(`/purchases/payments/${paymentId}`, { method: 'DELETE' }),
   sales: (params: Record<string, string | number | undefined> = {}) =>
     request<PageResult<BackendSalesRecord>>(`/sales${query(params)}`),
   salesDetail: (orderLineId: number) => request<BackendSalesDetail>(`/sales/${orderLineId}`),
@@ -332,10 +361,22 @@ export const api = {
     request<BackendSalesDetail>(`/sales/by-order${query({ project_id: projectId, order_id: orderId })}`),
   addSalesContract: (orderLineId: number, data: Record<string, string | number | null>) =>
     request<BackendSalesDetail>(`/sales/${orderLineId}/contracts`, { method: 'POST', body: JSON.stringify(data) }),
+  updateSalesContract: (contractId: number, data: Record<string, string | number | null>) =>
+    request<BackendSalesDetail>(`/sales/contracts/${contractId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSalesContract: (contractId: number) =>
+    request<BackendSalesDetail>(`/sales/contracts/${contractId}`, { method: 'DELETE' }),
   addSalesInvoice: (orderLineId: number, data: Record<string, string | number | null>) =>
     request<BackendSalesDetail>(`/sales/${orderLineId}/invoices`, { method: 'POST', body: JSON.stringify(data) }),
+  updateSalesInvoice: (invoiceId: number, data: Record<string, string | number | null>) =>
+    request<BackendSalesDetail>(`/sales/invoices/${invoiceId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSalesInvoice: (invoiceId: number) =>
+    request<BackendSalesDetail>(`/sales/invoices/${invoiceId}`, { method: 'DELETE' }),
   addSalesReceipt: (orderLineId: number, data: Record<string, string | number | null>) =>
     request<BackendSalesDetail>(`/sales/${orderLineId}/receipts`, { method: 'POST', body: JSON.stringify(data) }),
+  updateSalesReceipt: (receiptId: number, data: Record<string, string | number | null>) =>
+    request<BackendSalesDetail>(`/sales/receipts/${receiptId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSalesReceipt: (receiptId: number) =>
+    request<BackendSalesDetail>(`/sales/receipts/${receiptId}`, { method: 'DELETE' }),
   logs: () => request<PageResult<BackendOperationLog>>('/logs?limit=100'),
   backups: () => request<PageResult<BackendBackupInfo>>('/backups?limit=100'),
 };

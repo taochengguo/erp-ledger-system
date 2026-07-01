@@ -238,12 +238,8 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 font-sans mb-1 uppercase tracking-wide">
-            <span>项目管理</span>
-            <span>/</span>
-            <span className="text-slate-800 font-bold">台账详情</span>
-          </div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 font-sans">项目台账总览</h1>
+          <p className="text-sm text-slate-500 font-sans mt-1">查看项目订单、采购金额、回款与应收应付汇总。</p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-center">
           <button 
@@ -346,6 +342,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
             <div className="flex items-center gap-2">
               <input 
                 type="date" 
+                lang="zh-CN"
                 value={startDate}
                 onChange={e => setStartDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"
@@ -353,6 +350,7 @@ export default function LedgerScreen({ ledgers, orders, purchases, sales, onAddL
               <span className="text-slate-400 text-xs">至</span>
               <input 
                 type="date" 
+                lang="zh-CN"
                 value={endDate}
                 onChange={e => setEndDate(e.target.value)}
                 className="w-full px-3 py-1.5 border border-slate-200 rounded-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none text-xs text-slate-700"

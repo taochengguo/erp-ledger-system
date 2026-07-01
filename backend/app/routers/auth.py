@@ -40,6 +40,14 @@ class UserCreate(BaseModel):
     department_can_entry: bool = False
 
 
+class UserPermissionUpdate(BaseModel):
+    role_code: str
+    permissions: list[str] = Field(default_factory=list)
+    department_scope: list[str] = Field(default_factory=list)
+    department_can_view: bool = False
+    department_can_entry: bool = False
+
+
 @router.post("/login")
 def login(payload: LoginRequest) -> dict:
     with db() as conn:
@@ -158,6 +166,91 @@ def create_user(payload: UserCreate, admin: CurrentUser = Depends(require_permis
                 "user_id": admin.id,
                 "user_name": admin.display_name,
                 "detail": f"创建账号 {payload.username}，权限 {','.join(permissions) or '无'}",
+            },
+        )
+    return list_users(admin)
+
+
+@router.put("/users/{user_id}")
+def update_user_permissions(
+    user_id: int,
+    payload: UserPermissionUpdate,
+    admin: CurrentUser = Depends(require_permission("system_admin")),
+) -> dict:
+    if payload.role_code not in ROLE_PERMISSIONS:
+        raise HTTPException(status_code=400, detail="无效的角色")
+    permissions = normalize_permissions(payload.role_code, payload.permissions)
+    department_scope = [department.strip() for department in payload.department_scope if department.strip()]
+    if department_scope and not (payload.department_can_view or payload.department_can_entry):
+        raise HTTPException(status_code=400, detail="选择部门后至少需要勾选查看或录入权限")
+    with db() as conn:
+        target = conn.execute(
+            text(
+                """
+                SELECT id, username, display_name, role_code, permissions_json, is_active
+                FROM erp_user
+                WHERE id = :user_id
+                """
+            ),
+            {"user_id": user_id},
+        ).mappings().first()
+        if target is None or not target["is_active"]:
+            raise HTTPException(status_code=404, detail="账号不存在")
+        if "system_admin" not in permissions:
+            admin_rows = conn.execute(
+                text(
+                    """
+                    SELECT id, role_code, permissions_json
+                    FROM erp_user
+                    WHERE is_active = 1
+                    """
+                )
+            ).mappings().all()
+            active_admin_count = sum(
+                1
+                for row in admin_rows
+                if int(row["id"]) != user_id
+                and "system_admin"
+                in normalize_permissions(
+                    str(row["role_code"]),
+                    parse_json_list(row["permissions_json"]) if row["permissions_json"] else None,
+                )
+            )
+            if active_admin_count <= 0:
+                raise HTTPException(status_code=400, detail="至少保留一个系统管理员账号")
+        conn.execute(
+            text(
+                """
+                UPDATE erp_user
+                SET role_code = :role_code,
+                    permissions_json = :permissions_json,
+                    department_scope_json = :department_scope_json,
+                    department_can_view = :department_can_view,
+                    department_can_entry = :department_can_entry,
+                    updated_at = NOW()
+                WHERE id = :user_id
+                """
+            ),
+            {
+                "user_id": user_id,
+                "role_code": payload.role_code,
+                "permissions_json": encode_json_list(permissions),
+                "department_scope_json": encode_json_list(department_scope),
+                "department_can_view": int(payload.department_can_view),
+                "department_can_entry": int(payload.department_can_entry),
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO operation_log (user_id, user_name, module_name, action_name, detail, status)
+                VALUES (:user_id, :user_name, '账号管理', 'update_user_permissions', :detail, 'success')
+                """
+            ),
+            {
+                "user_id": admin.id,
+                "user_name": admin.display_name,
+                "detail": f"修改账号 {target['username']} 权限为 {','.join(permissions) or '无'}",
             },
         )
     return list_users(admin)

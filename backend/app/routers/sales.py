@@ -54,6 +54,9 @@ def list_sales(
     order_id: str | None = None,
     manager: str | None = None,
     department: str | None = None,
+    supplier_name: str | None = None,
+    contract_no: str | None = None,
+    receipt_date: str | None = None,
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user: CurrentUser = Depends(get_current_user),
@@ -72,17 +75,36 @@ def list_sales(
     if department:
         conditions.append("department = :department")
         params["department"] = department
+    if supplier_name:
+        conditions.append("supplier_name LIKE :supplier_name")
+        params["supplier_name"] = f"%{supplier_name}%"
+    if contract_no:
+        conditions.append("sales_contract_no LIKE :contract_no")
+        params["contract_no"] = f"%{contract_no}%"
+    if receipt_date:
+        conditions.append("latest_receipt_date = :receipt_date")
+        params["receipt_date"] = receipt_date
     apply_department_scope(conditions, params, user)
     where_sql = " AND ".join(conditions)
+    source_sql = """
+        SELECT v.*,
+               (
+                 SELECT MAX(sr.receipt_date)
+                 FROM sales_receipt sr
+                 WHERE sr.order_line_id = v.order_line_id
+                   AND sr.deleted_at IS NULL
+               ) AS latest_receipt_date
+        FROM v_order_line_finance v
+    """
     with db() as conn:
-        total = conn.execute(text(f"SELECT COUNT(*) FROM v_order_line_finance WHERE {where_sql}"), params).scalar()
+        total = conn.execute(text(f"SELECT COUNT(*) FROM ({source_sql}) sales_detail WHERE {where_sql}"), params).scalar()
         rows = conn.execute(
             text(
                 f"""
-                SELECT order_line_id, project_code, order_no, account_manager, department, sales_contract_no,
+                SELECT order_line_id, project_code, order_no, account_manager, department, supplier_name, sales_contract_no,
                        sales_contract_signed_date, sales_contract_value, sales_invoice_amount,
-                       total_received, accounts_receivable
-                FROM v_order_line_finance
+                       total_received, accounts_receivable, latest_receipt_date
+                FROM ({source_sql}) sales_detail
                 WHERE {where_sql}
                 ORDER BY order_date DESC, project_code
                 LIMIT :limit OFFSET :offset
@@ -271,6 +293,42 @@ def add_sales_contract(
     return get_sales_detail(order_line_id, user)
 
 
+@router.put("/contracts/{contract_id}")
+def update_sales_contract(
+    contract_id: int,
+    payload: SalesContractCreate,
+    user: CurrentUser = Depends(require_permission("sales_edit")),
+) -> dict:
+    order_line_id = _ensure_detail_record("sales_contract", contract_id, user, require_entry=True)
+    with db() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE sales_contract
+                SET contract_signed_date = :contract_signed_date,
+                    contract_signed_date_text = :contract_signed_date,
+                    sales_contract_no = :sales_contract_no,
+                    contract_value = :contract_value,
+                    performance_period = :performance_period,
+                    unsigned_contract_amount = :unsigned_contract_amount
+                WHERE id = :contract_id
+                """
+            ),
+            {"contract_id": contract_id, **_payload_dict(payload)},
+        )
+    return get_sales_detail(order_line_id, user)
+
+
+@router.delete("/contracts/{contract_id}")
+def delete_sales_contract(
+    contract_id: int,
+    user: CurrentUser = Depends(require_permission("sales_delete")),
+) -> dict:
+    order_line_id = _ensure_detail_record("sales_contract", contract_id, user, require_entry=True)
+    _soft_delete_detail("sales_contract", contract_id)
+    return get_sales_detail(order_line_id, user)
+
+
 @router.post("/{order_line_id}/invoices")
 def add_sales_invoice(
     order_line_id: int,
@@ -295,6 +353,43 @@ def add_sales_invoice(
             ),
             {"order_line_id": order_line_id, "phase_no": phase_no, **_payload_dict(payload)},
         )
+    return get_sales_detail(order_line_id, user)
+
+
+@router.put("/invoices/{invoice_id}")
+def update_sales_invoice(
+    invoice_id: int,
+    payload: SalesInvoiceCreate,
+    user: CurrentUser = Depends(require_permission("sales_edit")),
+) -> dict:
+    order_line_id = _ensure_detail_record("sales_invoice", invoice_id, user, require_entry=True)
+    with db() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE sales_invoice
+                SET invoice_doc_no = :invoice_doc_no,
+                    invoice_date = :invoice_date,
+                    invoice_date_text = :invoice_date,
+                    invoice_no = :invoice_no,
+                    invoice_amount = :invoice_amount,
+                    pending_invoice_amount = :pending_invoice_amount,
+                    delivered_not_invoiced_amount = :delivered_not_invoiced_amount
+                WHERE id = :invoice_id
+                """
+            ),
+            {"invoice_id": invoice_id, **_payload_dict(payload)},
+        )
+    return get_sales_detail(order_line_id, user)
+
+
+@router.delete("/invoices/{invoice_id}")
+def delete_sales_invoice(
+    invoice_id: int,
+    user: CurrentUser = Depends(require_permission("sales_delete")),
+) -> dict:
+    order_line_id = _ensure_detail_record("sales_invoice", invoice_id, user, require_entry=True)
+    _soft_delete_detail("sales_invoice", invoice_id)
     return get_sales_detail(order_line_id, user)
 
 
@@ -323,6 +418,41 @@ def add_sales_receipt(
     return get_sales_detail(order_line_id, user)
 
 
+@router.put("/receipts/{receipt_id}")
+def update_sales_receipt(
+    receipt_id: int,
+    payload: SalesReceiptCreate,
+    user: CurrentUser = Depends(require_permission("sales_edit")),
+) -> dict:
+    order_line_id = _ensure_detail_record("sales_receipt", receipt_id, user, require_entry=True)
+    with db() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE sales_receipt
+                SET receipt_date = :receipt_date,
+                    receipt_date_text = :receipt_date,
+                    payment_notice_no = :payment_notice_no,
+                    receipt_amount = :receipt_amount,
+                    receipt_ratio = :receipt_ratio
+                WHERE id = :receipt_id
+                """
+            ),
+            {"receipt_id": receipt_id, **_payload_dict(payload)},
+        )
+    return get_sales_detail(order_line_id, user)
+
+
+@router.delete("/receipts/{receipt_id}")
+def delete_sales_receipt(
+    receipt_id: int,
+    user: CurrentUser = Depends(require_permission("sales_delete")),
+) -> dict:
+    order_line_id = _ensure_detail_record("sales_receipt", receipt_id, user, require_entry=True)
+    _soft_delete_detail("sales_receipt", receipt_id)
+    return get_sales_detail(order_line_id, user)
+
+
 def _ensure_order_line(order_line_id: int, user: CurrentUser, require_entry: bool = False) -> None:
     with db() as conn:
         row = conn.execute(
@@ -345,6 +475,31 @@ def _payload_dict(payload: BaseModel) -> dict:
     if hasattr(payload, "model_dump"):
         return payload.model_dump()
     return payload.dict()
+
+
+def _ensure_detail_record(table_name: str, record_id: int, user: CurrentUser, require_entry: bool = False) -> int:
+    with db() as conn:
+        row = conn.execute(
+            text(
+                f"""
+                SELECT item.order_line_id, v.department
+                FROM {table_name} item
+                JOIN v_order_line_finance v ON v.order_line_id = item.order_line_id
+                WHERE item.id = :record_id AND item.deleted_at IS NULL
+                """
+            ),
+            {"record_id": record_id},
+        ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Sales record not found")
+    if not can_access_department(user, str(row["department"]) if row["department"] is not None else None, require_entry):
+        raise HTTPException(status_code=403, detail="Department permission denied")
+    return int(row["order_line_id"])
+
+
+def _soft_delete_detail(table_name: str, record_id: int) -> None:
+    with db() as conn:
+        conn.execute(text(f"UPDATE {table_name} SET deleted_at = CURRENT_TIMESTAMP WHERE id = :record_id"), {"record_id": record_id})
 
 
 def _next_phase(conn, table_name: str, order_line_id: int) -> int:

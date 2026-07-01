@@ -17,6 +17,7 @@ export interface ProjectLedger {
 }
 
 export interface OrderRecord {
+  orderLineId?: number; // 订单明细ID
   amountType?: string; // 全额/净额
   projectId: string; // 项目编号
   department?: string; // 部门
@@ -66,6 +67,7 @@ export interface PurchaseRecord {
   invoiceAmount: number; // 收票金额
   paymentAmount: number; // 付款金额
   supplier: string; // 供应商
+  paymentDate?: string; // 付款/回款时间
 }
 
 export interface SalesRecord {
@@ -80,6 +82,8 @@ export interface SalesRecord {
   invoiceAmount: number; // 开票金额
   totalReceived?: number; // 回款合计
   accountsReceivable?: number; // 应收款
+  supplierName?: string; // 采购厂家
+  receiptDate?: string; // 回款时间
 }
 
 export interface OperationLog {

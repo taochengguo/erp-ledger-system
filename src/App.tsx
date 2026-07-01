@@ -68,6 +68,7 @@ function mapLedger(item: BackendProjectLedger): ProjectLedger {
 
 function mapOrder(item: BackendOrderRecord): OrderRecord {
   return {
+    orderLineId: item.order_line_id,
     amountType: item.amount_type || '',
     projectId: item.project_code,
     projectName: item.project_name || '',
@@ -119,6 +120,7 @@ function mapPurchase(item: BackendPurchaseRecord): PurchaseRecord {
     invoiceAmount: Number(item.purchase_amount || 0),
     paymentAmount: Number(item.total_paid || 0),
     supplier: item.supplier_name || fallbackText,
+    paymentDate: dateOnly(item.latest_payment_date),
   };
 }
 
@@ -135,6 +137,8 @@ function mapSale(item: BackendSalesRecord): SalesRecord {
     invoiceAmount: Number(item.sales_invoice_amount || 0),
     totalReceived: Number(item.total_received || 0),
     accountsReceivable: Number(item.accounts_receivable || 0),
+    supplierName: item.supplier_name || '',
+    receiptDate: dateOnly(item.latest_receipt_date),
   };
 }
 
@@ -282,6 +286,11 @@ export default function App() {
     setUsers(result.items);
   };
 
+  const handleUpdateUserPermissions = async (userId: number, data: Omit<CreateUserPayload, 'username' | 'password' | 'display_name'>) => {
+    const result = await api.updateUserPermissions(userId, data);
+    setUsers(result.items);
+  };
+
   const addLog = (module: string, details: string) => {
     const now = new Date();
     const newLog: OperationLog = {
@@ -303,6 +312,26 @@ export default function App() {
   const handleAddOrder = (newItem: OrderRecord) => {
     setOrders((prev) => [newItem, ...prev]);
     addLog('订单管理', `本地录入订单 "${newItem.orderId}"`);
+  };
+
+  const handleUpdateOrder = async (target: OrderRecord, updatedItem: OrderRecord) => {
+    if (target.orderLineId) {
+      await api.updateOrder(target.orderLineId, orderToPayload(updatedItem));
+      await loadBackendData();
+    } else {
+      setOrders((prev) => prev.map((item) => (item === target ? updatedItem : item)));
+    }
+    addLog('订单管理', `修改订单 "${updatedItem.orderId}"`);
+  };
+
+  const handleDeleteOrder = async (target: OrderRecord) => {
+    if (target.orderLineId) {
+      await api.deleteOrder(target.orderLineId);
+      await loadBackendData();
+    } else {
+      setOrders((prev) => prev.filter((item) => item !== target));
+    }
+    addLog('订单管理', `删除订单 "${target.orderId}"`);
   };
 
   const handleAddSales = (newItem: SalesRecord) => {
@@ -345,8 +374,14 @@ export default function App() {
   }
 
   const canEnterOrders = hasPermission(currentUser, 'order_entry');
+  const canEditOrders = hasPermission(currentUser, 'order_edit');
+  const canDeleteOrders = hasPermission(currentUser, 'order_delete');
   const canEnterPurchases = hasPermission(currentUser, 'purchase_entry');
+  const canEditPurchases = hasPermission(currentUser, 'purchase_edit');
+  const canDeletePurchases = hasPermission(currentUser, 'purchase_delete');
   const canEnterSales = hasPermission(currentUser, 'sales_entry');
+  const canEditSales = hasPermission(currentUser, 'sales_edit');
+  const canDeleteSales = hasPermission(currentUser, 'sales_delete');
   const canManageSystem = hasPermission(currentUser, 'system_admin');
 
   return (
@@ -479,9 +514,19 @@ export default function App() {
               onAddLedger={handleAddLedger}
             />
           )}
-          {currentScreen === 'orders' && <OrdersScreen orders={orders} onAddOrder={handleAddOrder} canEnterOrders={canEnterOrders} />}
-          {currentScreen === 'purchases' && <PurchasesScreen purchases={purchases} canEnterPurchases={canEnterPurchases} />}
-          {currentScreen === 'sales' && <SalesScreen sales={sales} canEnterSales={canEnterSales} />}
+          {currentScreen === 'orders' && (
+            <OrdersScreen
+              orders={orders}
+              onAddOrder={handleAddOrder}
+              onUpdateOrder={handleUpdateOrder}
+              onDeleteOrder={handleDeleteOrder}
+              canEnterOrders={canEnterOrders}
+              canEditOrders={canEditOrders}
+              canDeleteOrders={canDeleteOrders}
+            />
+          )}
+          {currentScreen === 'purchases' && <PurchasesScreen purchases={purchases} canEnterPurchases={canEnterPurchases} canEditPurchases={canEditPurchases} canDeletePurchases={canDeletePurchases} />}
+          {currentScreen === 'sales' && <SalesScreen sales={sales} canEnterSales={canEnterSales} canEditSales={canEditSales} canDeleteSales={canDeleteSales} />}
           {currentScreen === 'system' && (
             <SystemScreen
               logs={logs}
@@ -493,6 +538,7 @@ export default function App() {
               onAddBackup={handleAddBackup}
               onRefresh={handleRefreshAll}
               onCreateUser={handleCreateUser}
+              onUpdateUserPermissions={handleUpdateUserPermissions}
               onDeleteUser={handleDeleteUser}
             />
           )}
@@ -500,6 +546,52 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+function numericQuantity(value: string) {
+  const match = String(value || '').match(/[\d.]+/);
+  return match ? Number(match[0]) : 0;
+}
+
+function orderToPayload(item: OrderRecord) {
+  return {
+    amount_type: item.amountType || null,
+    project_code: item.projectId,
+    project_name: item.projectName || null,
+    department: item.department || null,
+    branch_company: item.branchCompany || null,
+    account_manager: item.manager || null,
+    order_no: item.orderId,
+    order_date: item.orderDate || null,
+    business_type: item.businessType || null,
+    statistical_category: item.statisticalCategory || null,
+    team_name: item.teamName || null,
+    customer_unit_name: item.clientUnit || null,
+    user_name: item.userName || null,
+    regional_platform: item.regionalPlatform || null,
+    goods_name: item.goodsName || null,
+    specification_model: item.specModel || null,
+    unit_name: item.unitName || item.quantity.replace(/^[\d.]+\s*/, '') || null,
+    quantity: numericQuantity(item.quantity),
+    net_unit_price: item.netUnitPrice ?? null,
+    unit_price: item.unitPrice ?? null,
+    net_revenue: item.netRevenue ?? null,
+    order_value: item.orderValue,
+    supplier_name: item.supplierName || null,
+    purchase_unit_price_no_tax: item.purchaseUnitPriceNoTax ?? null,
+    purchase_unit_price: item.purchaseUnitPrice ?? null,
+    cost_no_tax: item.costNoTax ?? null,
+    purchase_amount: item.purchaseAmount ?? null,
+    delivery_date: item.deliveryDate || null,
+    delivery_quantity: item.deliveredQty ?? null,
+    delivery_revenue_no_tax: item.deliveryRevenueNoTax ?? null,
+    delivery_value: item.deliveryValue ?? null,
+    delivery_cost_no_tax: item.deliveryCostNoTax ?? null,
+    delivery_cost: item.deliveryCost ?? null,
+    pending_delivery_quantity: item.pendingDeliveryQuantity ?? null,
+    pending_delivery_amount_no_tax: item.pendingDeliveryAmountNoTax ?? null,
+    pending_delivery_amount: item.pendingDeliveryAmount ?? null,
+  };
 }
 
 function LoginScreen({ error, onLogin }: { error: string; onLogin: (username: string, password: string) => Promise<void> }) {
